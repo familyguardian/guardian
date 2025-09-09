@@ -29,7 +29,29 @@
   - PAM-Regeln werden beim Start gesetzt.
   - Session-Tracking läuft asynchron.
 
-## Geplante/Offene Schritte
+
+## Geplante/Offene Schritte & Designentscheidungen
+
+- **Enforcement-Logik**
+  - Sessions werden erst nach Erreichen von Quota + Grace-Minutes beendet.
+  - Vor dem Logout werden Desktop-Notifications verschickt (guardian_agent). Die Häufigkeit und Schwellenwerte der Notifications müssen noch festgelegt werden. **TODO: Design für Notification-Frequenz.**
+  - Session-Beendigung erfolgt zunächst mit `loginctl terminate-user <UID>`. **TODO: Später prüfen, ob gezieltere Aktionen nötig sind.**
+  - Game Sessions (Steam/Kiosk) benötigen eine eigene Behandlung und Notification-Logik. **TODO: Konzept für Game Sessions und deren Enforcement/Notification.**
+
+- **PAM-Integration**
+  - Login-Zeitregeln werden dynamisch angepasst, z.B. bei Bonuszeit oder Policy-Änderung.
+  - pam_time-Regeln gelten explizit nur für die in der Konfiguration aufgeführten Nutzer (Kinder). Eltern/Admins sind ausgenommen. **Hinweis: Die Syntax und Logik muss dies sicherstellen.**
+
+- **Systemd-Timer und Reset**
+  - systemd-Timer werden für Tagesreset und Curfew genutzt. Der Reset kann z.B. durch einen guardianctl-Command ausgelöst werden.
+  - **Offene Frage:** Was passiert, wenn der Rechner zum Reset-Zeitpunkt nicht läuft? (Nachholen beim nächsten Start?)
+
+- **Fehlerbehandlung**
+  - Fehler beim Enforcement (z.B. Session-Beendigung) werden geloggt. Später kann eine Nachricht an den Hub gesendet werden. **TODO: Logging mit möglichst vielen Details.**
+
+- **Notifications/guardian_agent**
+  - Desktop-Notifications werden über guardian_agent verschickt. **TODO: Schnittstelle und Protokoll für die Kommunikation festlegen.**
+
 
 - **Enforcement-Logik**
   - Implementiere die Überwachung und Durchsetzung von Quota/Curfew (z.B. Beenden von Sessions, Sperren von Logins).
@@ -61,7 +83,26 @@
   - Mock DBus und systemd für lokale Tests.
 
 
-## Hinweise zur weiteren Implementation
+
+## Hinweise zur weiteren Implementation & offene Fragen
+
+- **Explizite Nutzerüberwachung:**
+  - Nur Nutzer, die unter `users:` in der Konfiguration eingetragen sind, werden vom Daemon überwacht und erhalten Quota-/Curfew-Regeln.
+  - Ein leeres Objekt (z.B. `kid2: {}`) bedeutet, dass die Defaults für diesen Nutzer gelten.
+  - Alle anderen Nutzer (z.B. Eltern, Admins, Systemkonten) werden ignoriert und sind von den Regeln ausgenommen.
+  - Diese Logik muss in allen zukünftigen Komponenten (Enforcement, PAM, systemd, Netzwerk) berücksichtigt werden.
+
+- **Modularität:** Halte die Schnittstellen zwischen Komponenten klar und einfach. Policy und Storage sollten als zentrale Services genutzt werden.
+- **Konfigurierbarkeit:** Ermögliche das Setzen von Pfaden und Optionen über ENV-Variablen und systemd-Unit-Files.
+- **Sicherheit:** Achte auf sichere Rechtevergabe für IPC und Datenbankzugriffe. Backup und Restore von PAM-Konfigurationen.
+- **Fehlertoleranz:** Bei Fehlern in Policy oder Datenbank nie hart aussperren, sondern Warnungen ausgeben und permissiv weiterarbeiten.
+- **Dokumentation:** Halte die README und die Docstrings aktuell, um die Entwicklung für weitere Mitwirkende zu erleichtern.
+
+- **Offene Fragen:**
+  - Wie werden Notifications technisch ausgelöst (guardian_agent)? DBus, Socket, Kommando?
+  - Wie werden systemd-Timer nachgeholt, wenn der Rechner zum Reset-Zeitpunkt nicht läuft?
+  - Wie werden Game Sessions und deren Enforcement/Notification technisch umgesetzt?
+  - Wie flexibel und dynamisch sollen PAM-Regeln angepasst werden?
 
 - **Explizite Nutzerüberwachung:**
   - Nur Nutzer, die unter `users:` in der Konfiguration eingetragen sind, werden vom Daemon überwacht und erhalten Quota-/Curfew-Regeln.

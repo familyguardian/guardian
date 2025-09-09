@@ -17,8 +17,12 @@ class Enforcer:
 		"""
 		# Quota Enforcement
 		if not self.tracker.check_quota(username):
+			self.notify_user(username, "Quota erreicht! Deine Grace-Zeit beginnt.")
+			# TODO: Grace-Minutes Timer/Countdown
+			# TODO: Notification vor Ablauf der Grace-Zeit
+			# Nach Ablauf der Grace-Zeit:
 			self.terminate_session(username)
-			self.notify_user(username, "Quota erreicht! Deine Sitzung wird beendet.")
+			self.notify_user(username, "Deine Sitzung wird jetzt beendet.")
 
 		# Curfew Enforcement (optional, z.B. via PAMManager)
 		# TODO: Curfew-Check und ggf. Login sperren
