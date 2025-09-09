@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 class Policy:
-	def __init__(self, config_path: str = "config.yaml"):
-		self.config_path = Path(config_path)
+	def __init__(self, config_path: str = None):
+		import os
+		env_path = os.environ.get("GUARDIAN_DAEMON_CONFIG")
+		self.config_path = Path(config_path or env_path or "config.yaml")
 		self.data: Dict[str, Any] = {}
 		self.load()
 
@@ -19,6 +21,11 @@ class Policy:
 			self.data = yaml.safe_load(f)
 
 	def get_user_policy(self, username: str) -> Optional[Dict[str, Any]]:
+		"""
+		Gibt die Policy für einen Nutzer zurück, falls dieser explizit unter 'users:' eingetragen ist.
+		Falls der Nutzer nicht existiert, wird None zurückgegeben und der Daemon ignoriert ihn.
+		Ein leeres Objekt bedeutet: Defaults gelten für diesen Nutzer.
+		"""
 		users = self.data.get("users", {})
 		return users.get(username)
 
