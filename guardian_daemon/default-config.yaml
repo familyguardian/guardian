@@ -3,6 +3,7 @@
 
 hub_address: ""  # Adresse des Guardian-Hub, leer = deaktiviert
 db_path: "/var/lib/guardian/guardian.sqlite"  # Pfad zur SQLite-Datenbank
+ipc_socket: "/run/guardian-daemon.sock"  # Pfad zum IPC-Socket
 
 # Zeitpunkt für den täglichen Reset des Tageskontingents (Format HH:MM, Standard: "03:00")
 reset_time: "03:00"

@@ -6,38 +6,41 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+
+from guardian_daemon.storage import Storage
+
 class Policy:
-	def __init__(self, config_path: str = None):
+	def __init__(self, config_path: str = None, db_path: str = None):
 		import os
 		env_path = os.environ.get("GUARDIAN_DAEMON_CONFIG")
 		self.config_path = Path(config_path or env_path or "config.yaml")
-		self.data: Dict[str, Any] = {}
-		self.load()
-
-	def load(self):
-		if not self.config_path.exists():
-			raise FileNotFoundError(f"Policy-Datei nicht gefunden: {self.config_path}")
+		import yaml
 		with open(self.config_path, "r") as f:
 			self.data = yaml.safe_load(f)
+		self.db_path = db_path or self.data.get("db_path", "/var/lib/guardian/guardian.sqlite")
+		self.storage = Storage(self.db_path)
+		# Sync config to DB beim Start
+		self.storage.sync_config_to_db(self.data)
 
 	def get_user_policy(self, username: str) -> Optional[Dict[str, Any]]:
-		"""
-		Gibt die Policy für einen Nutzer zurück, falls dieser explizit unter 'users:' eingetragen ist.
-		Falls der Nutzer nicht existiert, wird None zurückgegeben und der Daemon ignoriert ihn.
-		Ein leeres Objekt bedeutet: Defaults gelten für diesen Nutzer.
-		"""
-		users = self.data.get("users", {})
-		return users.get(username)
+		return self.storage.get_user_settings(username)
 
 	def get_default(self, key: str) -> Any:
-		defaults = self.data.get("defaults", {})
-		return defaults.get(key)
+		defaults = self.storage.get_user_settings('default')
+		if defaults:
+			return defaults.get(key)
+		return None
 
 	def get_timezone(self) -> str:
+		# Zeitzone bleibt aus der Config
 		return self.data.get("timezone", "Europe/Berlin")
 
 	def reload(self):
-		self.load()
+		# Policy-Reload: Config neu laden und mit DB abgleichen
+		import yaml
+		with open(self.config_path, "r") as f:
+			self.data = yaml.safe_load(f)
+		self.storage.sync_config_to_db(self.data)
 
 # Beispiel für die Nutzung
 if __name__ == "__main__":

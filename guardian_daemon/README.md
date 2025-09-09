@@ -9,6 +9,7 @@
   - Grundlegende globale Parameter:
     - hub_address: Adresse des Guardian-Hub (leer = deaktiviert)
   - db_path: Pfad zur SQLite-Datenbank (default: /var/lib/guardian/guardian.sqlite)
+  - ipc_socket: Pfad zum IPC-Socket (default: /run/guardian-daemon.sock)
   - Globale Konfiguration für Quota-Vorwarnungen und Grace-Periode:
     - notifications: Wird auf oberster Ebene konfiguriert und gilt systemweit
       - pre_quota_minutes: Liste der Minuten vor Quota-Ende für Vorwarnungen (z.B. [15, 10, 5])
