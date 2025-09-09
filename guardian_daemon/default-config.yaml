@@ -1,11 +1,19 @@
 # Beispiel für die Guardian-Konfiguration (config.yaml)
 # Diese Datei kann als Vorlage für die Policy genutzt werden.
 
-# Zeitzone für die Quota- und Curfew-Berechnung (z.B. "Europe/Berlin")
-timezone: "Europe/Berlin"
+hub_address: ""  # Adresse des Guardian-Hub, leer = deaktiviert
+db_path: "/var/lib/guardian/guardian.sqlite"  # Pfad zur SQLite-Datenbank
 
 # Zeitpunkt für den täglichen Reset des Tageskontingents (Format HH:MM, Standard: "03:00")
 reset_time: "03:00"
+timezone: "Europe/Berlin"
+
+notifications:
+  pre_quota_minutes: [15, 10, 5]  # Minuten vor Quota-Ende für Vorwarnungen
+  grace_period:
+    enabled: true
+    duration: 10                  # Dauer der Grace-Periode in Minuten
+    interval: 1                   # Benachrichtigungsintervall in Minuten während der Grace-Periode
 
 defaults:
   # Maximale Nutzungszeit pro Tag in Minuten (Standard für alle Nutzer)

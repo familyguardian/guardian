@@ -6,7 +6,13 @@ Guardian ist ein Multi-Device-Parental-Control-System für Linux, das Zeitkontin
 
 ---
 
-## Entwicklungsworkflow mit VSCode, DevContainer und UV
+
+## Dynamik & Robustheit
+
+- **Config-Reload:** Die Konfiguration wird im Daemon periodisch (z.B. alle 5 Minuten) neu eingelesen. Änderungen werden automatisch erkannt und führen zu einer Aktualisierung der systemd-Timer und PAM-Regeln.
+- **Dynamische Anpassung:** Timer und Login-Regeln werden bei Policy-Änderungen sofort angepasst, ohne Neustart des Daemons.
+- **Timer-Nachholen:** Falls der Rechner zum Reset-Zeitpunkt nicht läuft, wird der Tagesreset beim nächsten Start nachgeholt.
+- **Logging:** Alle Schlüsselaktionen und Fehler werden ins systemd-Journal geloggt, um Betrieb und Debugging zu erleichtern.
 
 Dieses Monorepo ist für die Entwicklung mit [Visual Studio Code](https://code.visualstudio.com/) und [DevContainers](https://containers.dev/) optimiert. Die DevContainer-Konfiguration sorgt für eine konsistente Umgebung mit vorinstalliertem Python, Node.js, Git und UV als Paketmanager und Script-Runner.
 
@@ -157,23 +163,26 @@ users:
 
 ---
 
-## Offline-Verhalten
 
-- Agent cached letzte Policy + Verbrauch.
-- Erzwingt lokal weiter, auch ohne Server.
-- Bei Reconnect → **Delta-Sync** (`/usage/reconcile`).
-- Konfliktlösung: **Server gewinnt**; Agent korrigiert (ggf. sofortige Beendigung, falls Kind schon drüber).
+## Offline-Verhalten & Multi-Device-Vision
+
+- Der Daemon cached die letzte Policy und den Verbrauch lokal und erzwingt die Regeln auch ohne Verbindung zum Hub.
+- Bei Reconnect werden die lokalen Nutzungsdaten mit dem Hub synchronisiert (Delta-Sync).
+- Konfliktlösung: Der Server (Hub) ist die Quelle der Wahrheit; der Daemon korrigiert lokale Daten ggf. sofort.
+- Die Architektur ist darauf ausgelegt, Quota und Curfew geräteübergreifend zu synchronisieren und durchzusetzen (Multi-Device).
 
 ---
+
 
 ## Systemd-Integration (vom Daemon generiert)
 
 - **guardian.service** (root-Daemon)
 - **guardian.socket** (Admin-IPC, Gruppe `guardian-admin`)
 - **curfew@.service / timer** (Logout pro Kind zu festen Zeiten)
-- **daily-reset.service / timer** (Reset Quotas um 00:05)
+- **daily-reset.service / timer** (Reset Quotas zum konfigurierbaren Zeitpunkt, z.B. 03:00)
 - **gamesession@.service** (optional: Kiosk-Modus für Steam/Gamescope)
 - **PAM-Managed Block** in `/etc/security/time.conf`
+- **Automatische Aktivierung und Nachholen von Timern:** Timer werden bei Policy-Änderung automatisch aktualisiert und beim Start nachgeholt, falls sie verpasst wurden.
 
 ---
 

@@ -1,10 +1,43 @@
-# guardian-daemon
+
+## Design-Entscheidungen
+
+- **Explizite Nutzerüberwachung:** Nur Nutzer, die unter `users:` in der Konfiguration eingetragen sind, werden überwacht. Eltern/Admins/Systemkonten sind ausgenommen.
+- **Config-Reload:** Die Konfiguration wird alle 5 Minuten neu eingelesen. Änderungen werden automatisch erkannt und führen zu einer Aktualisierung der systemd-Timer und PAM-Regeln.
+- **Dynamische Anpassung:** Timer und Login-Regeln werden bei Policy-Änderungen sofort angepasst, ohne Neustart des Daemons.
+- **Timer-Nachholen:** Falls der Rechner zum Reset-Zeitpunkt nicht läuft, wird der Tagesreset beim nächsten Start nachgeholt.
+- **Quota-Berechnung:** Tageskontingent wird ab einem konfigurierbaren Reset-Zeitpunkt berechnet, nicht ab Mitternacht. Laufende Sessions werden mitgerechnet.
+  - Grundlegende globale Parameter:
+    - hub_address: Adresse des Guardian-Hub (leer = deaktiviert)
+  - db_path: Pfad zur SQLite-Datenbank (default: /var/lib/guardian/guardian.sqlite)
+  - Globale Konfiguration für Quota-Vorwarnungen und Grace-Periode:
+    - notifications: Wird auf oberster Ebene konfiguriert und gilt systemweit
+      - pre_quota_minutes: Liste der Minuten vor Quota-Ende für Vorwarnungen (z.B. [15, 10, 5])
+      - grace_period.enabled: Aktiviert die Grace-Periode
+      - grace_period.duration: Dauer der Grace-Periode in Minuten
+      - grace_period.interval: Benachrichtigungsintervall in Minuten während der Grace-Periode
+    - defaults: Reserviert für nutzerspezifische Standardwerte (z.B. daily_quota_minutes, curfew, grace_minutes)
 
 ## Überblick
 
 `guardian-daemon` ist der systemweite Hintergrunddienst des Guardian-Systems zur Durchsetzung von Zeitkontingenten und Curfews für Kinder auf Linux-Geräten. Er läuft als systemd-Service mit Root-Rechten und ist modular aufgebaut.
 
+
 ### Bisherige Komponenten
+
+- **Quota-Berechnung**
+  - Summiert alle Sessions eines Tages seit dem letzten Reset-Zeitpunkt und prüft gegen das Tageskontingent.
+  - Berücksichtigt Grace-Zeit und laufende Sessions.
+
+- **Dynamische PAM-Regeln**
+  - Login-Zeitregeln werden bei jeder Policy-Änderung automatisch angepasst.
+  - Regeln gelten explizit nur für die in der Konfiguration aufgeführten Nutzer (Kinder).
+
+- **Systemd-Timer-Management**
+  - Tagesreset und Curfew werden über systemd-Timer/Units automatisiert.
+  - Timer werden bei Policy-Änderung aktualisiert und beim Start nachgeholt, falls verpasst.
+
+- **Fehlerlogging**
+  - Alle Schlüsselaktionen und Fehler werden ins systemd-Journal geloggt.
 
 - **Policy-Loader (`policy.py`)**
   - Lädt die Konfiguration aus einer YAML-Datei (Pfad über ENV `GUARDIAN_DAEMON_CONFIG` oder Fallback auf `config.yaml`).
@@ -30,36 +63,13 @@
   - Session-Tracking läuft asynchron.
 
 
-## Geplante/Offene Schritte & Designentscheidungen
+
+## Noch offene Schritte & TODOs
 
 - **Enforcement-Logik**
-  - Sessions werden erst nach Erreichen von Quota + Grace-Minutes beendet.
-  - Vor dem Logout werden Desktop-Notifications verschickt (guardian_agent). Die Häufigkeit und Schwellenwerte der Notifications müssen noch festgelegt werden. **TODO: Design für Notification-Frequenz.**
-  - Session-Beendigung erfolgt zunächst mit `loginctl terminate-user <UID>`. **TODO: Später prüfen, ob gezieltere Aktionen nötig sind.**
-  - Game Sessions (Steam/Kiosk) benötigen eine eigene Behandlung und Notification-Logik. **TODO: Konzept für Game Sessions und deren Enforcement/Notification.**
-
-- **PAM-Integration**
-  - Login-Zeitregeln werden dynamisch angepasst, z.B. bei Bonuszeit oder Policy-Änderung.
-  - pam_time-Regeln gelten explizit nur für die in der Konfiguration aufgeführten Nutzer (Kinder). Eltern/Admins sind ausgenommen. **Hinweis: Die Syntax und Logik muss dies sicherstellen.**
-
-- **Systemd-Timer und Reset**
-  - systemd-Timer werden für Tagesreset und Curfew genutzt. Der Reset kann z.B. durch einen guardianctl-Command ausgelöst werden.
-  - **Offene Frage:** Was passiert, wenn der Rechner zum Reset-Zeitpunkt nicht läuft? (Nachholen beim nächsten Start?)
-
-- **Fehlerbehandlung**
-  - Fehler beim Enforcement (z.B. Session-Beendigung) werden geloggt. Später kann eine Nachricht an den Hub gesendet werden. **TODO: Logging mit möglichst vielen Details.**
-
-- **Notifications/guardian_agent**
-  - Desktop-Notifications werden über guardian_agent verschickt. **TODO: Schnittstelle und Protokoll für die Kommunikation festlegen.**
-
-
-- **Enforcement-Logik**
-  - Implementiere die Überwachung und Durchsetzung von Quota/Curfew (z.B. Beenden von Sessions, Sperren von Logins).
-  - Integration mit systemd und PAM für Live-Enforcement.
-
-- **Systemd- und Timer-Management**
-  - Automatisches Erstellen und Verwalten von systemd-Units/Timer für Curfew und Tagesreset.
-  - Datei: `systemd_manager.py`
+  - Design für Notification-Frequenz und Schwellenwerte festlegen (guardian_agent).
+  - Session-Beendigung ggf. gezielter umsetzen (z.B. nur grafische Sessions, Game Sessions).
+  - Konzept für Game Sessions und deren Enforcement/Notification ausarbeiten.
 
 - **Netzwerk-Client**
   - Kommunikation mit zentralem Guardian-Hub (API/WebSocket).
@@ -70,13 +80,8 @@
   - Implementiere einen lokalen Socket für Admin-Kommandos (Bonuszeit, Policy-Reload, etc.).
   - Datei: `ipc.py`
 
-- **Quota-Berechnung**
-  - Summiere alle Sessions eines Tages und prüfe gegen das Tageskontingent.
-  - Berücksichtige Grace-Zeit und Bonuszeit.
-
 - **Fehler- und Ausnahmebehandlung**
-  - Fallback auf permissiven Modus bei Policy- oder DB-Fehlern.
-  - Logging und Audit-Trail.
+  - Logging mit möglichst vielen Details, ggf. Nachricht an den Hub.
 
 - **Tests und Mocking**
   - Schreibe Unit- und Integrationstests für alle Kernmodule.
@@ -84,7 +89,36 @@
 
 
 
-## Hinweise zur weiteren Implementation & offene Fragen
+
+## Roadmap / Phasen
+
+**Phase 0 — Lokal (pro Gerät)**
+- Daemon (systemd), Policy-Loader, PAM-Zeitfenster, logind-Watcher, Timer für Curfew/Reset.
+- guardianctl (CLI).
+
+**Phase 1 — Hub (MVP)**
+- Server mit Policies, Usage, Sessions, API.
+- Geräte-Enrollment, Pull von Policies, Heartbeats.
+- Tagesreset serverseitig.
+
+**Phase 2 — Multi-Device & Push**
+- WebSocket Push: sofortige Terminierung auf allen Geräten.
+- Konfliktlösung + Offline-Deltas.
+- Eltern-Dashboard mit Live-Status.
+
+**Phase 3 — Komfort & Härtung**
+- Rollen/Mehrere Eltern, 2FA, Benachrichtigungen (Mail/Signal/Matrix).
+- Allowlist/Blocklist für Apps.
+- Kiosk-Mode-Units pro Kind.
+
+## Systemd-Integration (vom Daemon generiert)
+
+- **guardian.service** (root-Daemon)
+- **guardian.socket** (Admin-IPC, Gruppe `guardian-admin`)
+- **curfew@.service / timer** (Logout pro Kind zu festen Zeiten)
+- **daily-reset.service / timer** (Reset Quotas zum konfigurierbaren Zeitpunkt, z.B. 03:00)
+- **gamesession@.service** (optional: Kiosk-Modus für Steam/Gamescope)
+- **PAM-Managed Block** in `/etc/security/time.conf`
 
 - **Explizite Nutzerüberwachung:**
   - Nur Nutzer, die unter `users:` in der Konfiguration eingetragen sind, werden vom Daemon überwacht und erhalten Quota-/Curfew-Regeln.
