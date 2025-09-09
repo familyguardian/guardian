@@ -43,12 +43,42 @@ class SessionTracker:
 			print(f"Logout: {session['username']} Session {session_id} Dauer: {duration:.1f}s")
 
 	def check_quota(self, username):
-		quota = self.policy.get_user_policy(username)
-		if not quota:
+		"""
+		Summiert alle Sessions seit dem letzten Reset-Zeitpunkt und prüft gegen das Tageskontingent.
+		Gibt True zurück, wenn noch Zeit übrig ist, sonst False.
+		"""
+		# Quota aus Policy holen
+		user_policy = self.policy.get_user_policy(username)
+		if user_policy is None:
+			return True  # Nutzer wird nicht überwacht
+		quota = user_policy.get("daily_quota_minutes")
+		if quota is None:
 			quota = self.policy.get_default("daily_quota_minutes")
-		# TODO: Summiere alle Sessions des Tages und prüfe gegen quota
-		# Rückgabe: True wenn noch Zeit übrig, False wenn Limit erreicht
-		return True
+
+		# Reset-Zeitpunkt aus Policy holen
+		import datetime
+		tz = self.policy.get_timezone()
+		reset_time = self.policy.data.get("reset_time", "03:00")
+		now = datetime.datetime.now(datetime.timezone.utc).astimezone()
+		# Berechne den letzten Reset-Zeitpunkt (heute oder gestern)
+		reset_hour, reset_minute = map(int, reset_time.split(":"))
+		today_reset = now.replace(hour=reset_hour, minute=reset_minute, second=0, microsecond=0)
+		if now < today_reset:
+			last_reset = today_reset - datetime.timedelta(days=1)
+		else:
+			last_reset = today_reset
+
+		# Summiere alle Sessions seit dem letzten Reset
+		sessions = self.storage.get_sessions_for_user(username, since=last_reset.timestamp())
+		total_minutes = sum((s[6] for s in sessions)) / 60  # s[6] = duration (Sekunden)
+
+		# Laufende Session mitrechnen
+		for session in self.active_sessions.values():
+			if session["username"] == username:
+				total_minutes += (time.monotonic() - session["start_time"]) / 60
+
+		# Quota-Check
+		return total_minutes < quota
 
 	async def run(self):
 		bus = await MessageBus().connect()
