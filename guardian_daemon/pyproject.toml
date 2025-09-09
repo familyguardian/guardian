@@ -1,0 +1,13 @@
+[project]
+name = "guardian_daemon"
+version = "0.1.0"
+description = "Multi-device parental control system - Daemon"
+authors = [{ name = "Phillip Stockmann", email = "ZyanKLee@users.noreply.github.com" }]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0.2",
+]
+
+
