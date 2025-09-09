@@ -14,12 +14,30 @@ from guardian_daemon.policy import Policy
 
 
 class SessionTracker:
+	"""
+	Überwacht und speichert Nutzersessions, prüft Quota und Curfew.
+	Bindet sich an systemd-logind via DBus.
+	"""
 	def __init__(self, policy: Policy):
+		"""
+		Initialisiert den SessionTracker.
+
+		Args:
+			policy (Policy): Policy-Instanz
+		"""
 		self.policy = policy
 		self.storage = Storage()
 		self.active_sessions = {}  # session_id -> {uid, username, start_time}
 
 	def handle_login(self, session_id, uid, username):
+		"""
+		Registriert eine neue Session beim Login.
+
+		Args:
+			session_id (str): Session-ID
+			uid (int): User-ID
+			username (str): Nutzername
+		"""
 		self.active_sessions[session_id] = {
 			"uid": uid,
 			"username": username,
@@ -28,6 +46,12 @@ class SessionTracker:
 		print(f"Login: {username} (UID {uid}) Session {session_id}")
 
 	def handle_logout(self, session_id):
+		"""
+		Beendet eine Session beim Logout und speichert sie in der Datenbank.
+
+		Args:
+			session_id (str): Session-ID
+		"""
 		session = self.active_sessions.pop(session_id, None)
 		if session:
 			end_time = time.monotonic()
@@ -46,8 +70,13 @@ class SessionTracker:
 		"""
 		Summiert alle Sessions seit dem letzten Reset-Zeitpunkt und prüft gegen das Tageskontingent.
 		Gibt True zurück, wenn noch Zeit übrig ist, sonst False.
+
+		Args:
+			username (str): Nutzername
+
+		Returns:
+			bool: True wenn noch Zeit übrig, False wenn Limit erreicht
 		"""
-		# Quota aus Policy holen
 		user_policy = self.policy.get_user_policy(username)
 		if user_policy is None:
 			return True  # Nutzer wird nicht überwacht
@@ -55,12 +84,9 @@ class SessionTracker:
 		if quota is None:
 			quota = self.policy.get_default("daily_quota_minutes")
 
-		# Reset-Zeitpunkt aus Policy holen
 		import datetime
-		tz = self.policy.get_timezone()
 		reset_time = self.policy.data.get("reset_time", "03:00")
 		now = datetime.datetime.now(datetime.timezone.utc).astimezone()
-		# Berechne den letzten Reset-Zeitpunkt (heute oder gestern)
 		reset_hour, reset_minute = map(int, reset_time.split(":"))
 		today_reset = now.replace(hour=reset_hour, minute=reset_minute, second=0, microsecond=0)
 		if now < today_reset:
@@ -68,19 +94,19 @@ class SessionTracker:
 		else:
 			last_reset = today_reset
 
-		# Summiere alle Sessions seit dem letzten Reset
 		sessions = self.storage.get_sessions_for_user(username, since=last_reset.timestamp())
 		total_minutes = sum((s[6] for s in sessions)) / 60  # s[6] = duration (Sekunden)
 
-		# Laufende Session mitrechnen
 		for session in self.active_sessions.values():
 			if session["username"] == username:
 				total_minutes += (time.monotonic() - session["start_time"]) / 60
 
-		# Quota-Check
 		return total_minutes < quota
 
 	async def run(self):
+		"""
+		Startet das Session-Tracking und bindet sich an systemd-logind via DBus.
+		"""
 		bus = await MessageBus().connect()
 		introspection = await bus.introspect('org.freedesktop.login1', '/org/freedesktop/login1')
 		obj = bus.get_proxy_object('org.freedesktop.login1', '/org/freedesktop/login1', introspection)
@@ -93,7 +119,6 @@ class SessionTracker:
 		def session_removed_handler(session_id):
 			self.handle_logout(session_id)
 
-		# Signal-Handler registrieren
 		manager.on_session_new(session_new_handler)
 		manager.on_session_removed(session_removed_handler)
 
@@ -102,6 +127,15 @@ class SessionTracker:
 			await asyncio.sleep(3600)
 
 	def _get_username(self, uid):
+		"""
+		Holt den Nutzernamen zu einer UID.
+
+		Args:
+			uid (int): User-ID
+
+		Returns:
+			str: Nutzername
+		"""
 		import pwd
 		try:
 			return pwd.getpwuid(uid).pw_name
@@ -113,20 +147,7 @@ class SessionTracker:
 		self.storage = Storage()
 		self.active_sessions = {}  # session_id -> {uid, username, start_time}
 
-	def _init_db(self):
-		c = self.conn.cursor()
-		c.execute("""
-			CREATE TABLE IF NOT EXISTS sessions (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				session_id TEXT,
-				username TEXT,
-				uid INTEGER,
-				start_time REAL,
-				end_time REAL,
-				duration REAL
-			)
-		""")
-		self.conn.commit()
+	# DB-Initialisierung erfolgt zentral in Storage
 
 	def handle_login(self, session_id, uid, username):
 		self.active_sessions[session_id] = {

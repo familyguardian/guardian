@@ -11,7 +11,14 @@ from guardian_daemon.systemd_manager import SystemdManager
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
 class GuardianDaemon:
+	"""
+	Hauptklasse des Guardian-Daemon.
+	Initialisiert alle Kernkomponenten und steuert den Ablauf.
+	"""
 	def __init__(self):
+		"""
+		Initialisiert Policy, Storage, PAM, Systemd und SessionTracker.
+		"""
 		self.policy = Policy()
 		self.storage = Storage()
 		self.pam = PamManager(self.policy)
@@ -20,12 +27,18 @@ class GuardianDaemon:
 		self.last_config = self._get_config_snapshot()
 
 	def _get_config_snapshot(self):
-		"""Erzeuge einen Hash/Snapshot der aktuellen Policy-Konfiguration."""
+		"""
+		Erzeuge einen Hash/Snapshot der aktuellen Policy-Konfiguration.
+		Returns:
+			str: SHA256-Hash der Policy-Daten
+		"""
 		import hashlib, yaml
 		return hashlib.sha256(yaml.dump(self.policy.data).encode()).hexdigest()
 
 	async def periodic_reload(self):
-		"""Prüft alle 5 Minuten auf Config-Änderungen und aktualisiert Timer/PAM."""
+		"""
+		Prüft alle 5 Minuten auf Config-Änderungen und aktualisiert Timer/PAM.
+		"""
 		while True:
 			await asyncio.sleep(300)
 			old_snapshot = self.last_config
@@ -40,23 +53,29 @@ class GuardianDaemon:
 				self.last_config = new_snapshot
 
 	def check_and_recover_reset(self):
-		"""Prüft beim Start, ob der letzte Reset ausgeführt wurde, und holt ihn ggf. nach."""
+		"""
+		Prüft beim Start, ob der letzte Reset ausgeführt wurde, und holt ihn ggf. nach.
+		"""
 		# TODO: Implementiere Logik, z.B. mit Timestamp in Storage oder Lockfile
 		logging.info("Prüfe, ob Tagesreset nachgeholt werden muss (Stub).")
 
 	async def run(self):
-		# Initiales Setzen von PAM und Timer
+		"""
+		Startet alle Komponenten und Tasks des Daemons.
+		"""
 		self.pam.write_time_rules()
 		reset_time = self.policy.data.get("reset_time", "03:00")
 		self.systemd.create_daily_reset_timer(reset_time)
 		self.check_and_recover_reset()
-		# Starte Session-Tracking und periodisches Reload parallel
 		await asyncio.gather(
 			self.tracker.run(),
 			self.periodic_reload()
 		)
 
 def main():
+	"""
+	Entry Point für den Guardian-Daemon.
+	"""
 	daemon = GuardianDaemon()
 	asyncio.run(daemon.run())
 

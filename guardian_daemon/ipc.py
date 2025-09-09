@@ -7,7 +7,17 @@ from guardian_daemon.policy import Policy
 
 
 class GuardianIPCServer:
+    """
+    IPC-Server für Admin-Kommandos des Guardian-Daemon.
+    Stellt eine Socket-Schnittstelle für Status- und Steuerbefehle bereit.
+    """
     def __init__(self, config):
+        """
+        Initialisiert den IPC-Server und öffnet den Unix-Socket.
+
+        Args:
+            config (dict): Konfigurationsdaten
+        """
         self.policy = Policy()
         self.socket_path = config.get('ipc_socket', '/run/guardian-daemon.sock')
         self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -25,6 +35,9 @@ class GuardianIPCServer:
         }
 
     def serve_once(self):
+        """
+        Wartet auf einen eingehenden Befehl, führt den passenden Handler aus und sendet die Antwort zurück.
+        """
         conn, _ = self.server.accept()
         data = conn.recv(1024).decode().strip()
         cmd, *args = data.split(' ', 1)
@@ -38,12 +51,19 @@ class GuardianIPCServer:
         conn.close()
 
     def handle_list_kids(self, _):
-        c = self.policy.storage.conn.cursor()
-        c.execute("SELECT username FROM user_settings WHERE username != 'default'")
-        kids = [row[0] for row in c.fetchall()]
+        """
+        Gibt die Liste aller Kinder (Nutzer) zurück.
+        """
+        kids = self.policy.storage.get_all_usernames()
         return json.dumps({'kids': kids})
 
     def handle_get_quota(self, kid):
+        """
+        Gibt den aktuellen Quota-Stand eines Kindes zurück.
+
+        Args:
+            kid (str): Nutzername
+        """
         if not kid:
             return json.dumps({'error': 'missing kid'})
         from guardian_daemon.sessions import SessionTracker
@@ -73,6 +93,12 @@ class GuardianIPCServer:
         return json.dumps({'kid': kid, 'used': round(used, 2), 'limit': quota, 'remaining': round(remaining, 2)})
 
     def handle_get_curfew(self, kid):
+        """
+        Gibt die aktuellen Curfew-Zeiten eines Kindes zurück.
+
+        Args:
+            kid (str): Nutzername
+        """
         if not kid:
             return json.dumps({'error': 'missing kid'})
         user_policy = self.policy.get_user_policy(kid)
@@ -84,6 +110,9 @@ class GuardianIPCServer:
         return json.dumps({'kid': kid, 'curfew': curfew})
 
     def handle_list_timers(self, _):
+        """
+        Listet alle aktiven Guardian-Timer.
+        """
         from guardian_daemon.systemd_manager import SYSTEMD_PATH
         timers = []
         for f in os.listdir(SYSTEMD_PATH):
@@ -92,12 +121,18 @@ class GuardianIPCServer:
         return json.dumps({'timers': timers})
 
     def handle_reload_timers(self, _):
+        """
+        Lädt die Timer-Konfiguration neu.
+        """
         from guardian_daemon.systemd_manager import SystemdManager
         mgr = SystemdManager()
         mgr.create_daily_reset_timer()
         return json.dumps({'status': 'timers reloaded'})
 
     def handle_reset_quota(self, _):
+        """
+        Setzt das Tageskontingent für alle Nutzer zurück (löscht Sessions ab letztem Reset).
+        """
         import datetime
         reset_time = self.policy.data.get('reset_time', '03:00')
         now = datetime.datetime.now(datetime.timezone.utc).astimezone()
@@ -107,12 +142,13 @@ class GuardianIPCServer:
             last_reset = today_reset - datetime.timedelta(days=1)
         else:
             last_reset = today_reset
-        c = self.policy.storage.conn.cursor()
-        c.execute("DELETE FROM sessions WHERE start_time >= ?", (last_reset.timestamp(),))
-        self.policy.storage.conn.commit()
+        self.policy.storage.delete_sessions_since(last_reset.timestamp())
         return json.dumps({'status': 'quota reset'})
 
     def close(self):
+        """
+        Schließt den IPC-Socket und entfernt die Socket-Datei.
+        """
         self.server.close()
         if os.path.exists(self.socket_path):
             os.remove(self.socket_path)
