@@ -1,4 +1,3 @@
-
 import socket
 import json
 import os
@@ -32,6 +31,7 @@ class GuardianIPCServer:
             'list_timers': self.handle_list_timers,
             'reload_timers': self.handle_reload_timers,
             'reset_quota': self.handle_reset_quota,
+            'describe_commands': self.handle_describe_commands,  # <--- NEU
         }
 
     def serve_once(self):
@@ -144,6 +144,24 @@ class GuardianIPCServer:
             last_reset = today_reset
         self.policy.storage.delete_sessions_since(last_reset.timestamp())
         return json.dumps({'status': 'quota reset'})
+
+    def handle_describe_commands(self, _):
+        """
+        Gibt eine Beschreibung aller verfügbaren IPC-Kommandos und deren Parameter als JSON zurück.
+        """
+        commands = {}
+        for cmd, handler in self.handlers.items():
+            # Docstring als Beschreibung
+            desc = handler.__doc__.strip() if handler.__doc__ else ""
+            # Parameter aus Funktionsdefinition (außer self)
+            import inspect
+            sig = inspect.signature(handler)
+            params = [p.name for p in sig.parameters.values() if p.name != 'self' and p.name != '_']
+            commands[cmd] = {
+                'description': desc,
+                'params': params
+            }
+        return json.dumps(commands)
 
     def close(self):
         """
