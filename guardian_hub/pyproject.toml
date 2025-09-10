@@ -1,0 +1,12 @@
+[project]
+name = "guardian-hub"
+version = "0.1.0"
+description = "Multi-device parental control system - System Hub"
+authors = [{ name = "Phillip Stockmann", email = "ZyanKLee@users.noreply.github.com" }]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = []

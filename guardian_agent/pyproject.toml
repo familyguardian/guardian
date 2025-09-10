@@ -1,0 +1,12 @@
+[project]
+name = "guardian-agent"
+version = "0.1.0"
+description = "Multi-device parental control system - Userspace Agent"
+authors = [{ name = "Phillip Stockmann", email = "ZyanKLee@users.noreply.github.com" }]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = []
