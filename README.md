@@ -245,3 +245,31 @@ guardian/
  └─ scripts/
      └─ install_artifacts.py
 ```
+
+---
+
+## Dokumentation bauen
+
+Die zentrale API- und Projektdokumentation wird mit [Sphinx](https://www.sphinx-doc.org/) aus allen Unterprojekten generiert.
+
+### Voraussetzungen
+- Alle Python-Abhängigkeiten und Sphinx müssen im DevContainer/venv installiert sein.
+- Die Unterprojekte müssen als Pakete installiert sein (editable install).
+
+### Schritt-für-Schritt
+
+1. **DevContainer öffnen**
+   - Repository in VSCode öffnen und „Reopen in Container“ wählen.
+
+2. **Doku bauen**
+   - Im Projekt-Root:
+     ```sh
+     bash scripts/gen_docs.sh
+     ```
+   - Das Skript installiert alle Unterprojekte als Pakete und baut die zentrale Sphinx-Dokumentation.
+   - Die fertige HTML-Doku liegt in `docs/_build/html`.
+
+### Hinweise
+- Die Docstrings aus allen Modulen werden automatisch integriert.
+- Statische Seiten und API-Doku sind zentral in `docs/index.rst` gepflegt.
+- Bei Änderungen an Modulen oder Docstrings einfach das Skript erneut ausführen.
