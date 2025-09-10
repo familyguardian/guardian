@@ -11,4 +11,13 @@ dependencies = [
     "pyyaml>=6.0.2",
 ]
 
+[dependency-groups]
+dev = [
+    "pip>=25.2",
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.6.19",
+    "mkdocstrings>=0.30.0",
+    "mkdocstrings-python>=1.18.2",
+]
+
 
