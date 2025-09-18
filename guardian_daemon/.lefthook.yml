@@ -1,0 +1,20 @@
+pre-commit:
+  parallel: true
+  commands:
+    black:
+      run: black .
+      stage_fixed: true
+    isort:
+      run: isort .
+      stage_fixed: true
+    mypy:
+      run: mypy guardian_daemon
+
+pre-push:
+  commands:
+    black-check:
+      run: black --check .
+    isort-check:
+      run: isort --check .
+    mypy:
+      run: mypy guardian_daemon
