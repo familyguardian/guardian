@@ -1,4 +1,3 @@
-
 def main():
     """
     Einstiegspunkt für guardianctl.

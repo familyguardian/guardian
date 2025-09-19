@@ -1,11 +1,18 @@
 
+# Guardian Daemon (guardian-daemon)
+
 ## Design-Entscheidungen
 
-- **Explizite Nutzerüberwachung:** Nur Nutzer, die unter `users:` in der Konfiguration eingetragen sind, werden überwacht. Eltern/Admins/Systemkonten sind ausgenommen.
-- **Config-Reload:** Die Konfiguration wird alle 5 Minuten neu eingelesen. Änderungen werden automatisch erkannt und führen zu einer Aktualisierung der systemd-Timer und PAM-Regeln.
-- **Dynamische Anpassung:** Timer und Login-Regeln werden bei Policy-Änderungen sofort angepasst, ohne Neustart des Daemons.
-- **Timer-Nachholen:** Falls der Rechner zum Reset-Zeitpunkt nicht läuft, wird der Tagesreset beim nächsten Start nachgeholt.
-- **Quota-Berechnung:** Tageskontingent wird ab einem konfigurierbaren Reset-Zeitpunkt berechnet, nicht ab Mitternacht. Laufende Sessions werden mitgerechnet.
+- **Explizite Nutzerüberwachung:** Nur Nutzer, die unter `users:` in der Konfiguration eingetragen sind, werden
+  überwacht. Eltern/Admins/Systemkonten sind ausgenommen.
+- **Config-Reload:** Die Konfiguration wird alle 5 Minuten neu eingelesen. Änderungen werden automatisch erkannt und
+  führen zu einer Aktualisierung der systemd-Timer und PAM-Regeln.
+- **Dynamische Anpassung:** Timer und Login-Regeln werden bei Policy-Änderungen sofort angepasst, ohne Neustart des
+  Daemons.
+- **Timer-Nachholen:** Falls der Rechner zum Reset-Zeitpunkt nicht läuft, wird der Tagesreset beim nächsten Start
+  nachgeholt.
+- **Quota-Berechnung:** Tageskontingent wird ab einem konfigurierbaren Reset-Zeitpunkt berechnet, nicht ab
+  Mitternacht. Laufende Sessions werden mitgerechnet.
   - Grundlegende globale Parameter:
     - hub_address: Adresse des Guardian-Hub (leer = deaktiviert)
   - db_path: Pfad zur SQLite-Datenbank (default: /var/lib/guardian/guardian.sqlite)
@@ -20,8 +27,8 @@
 
 ## Überblick
 
-`guardian-daemon` ist der systemweite Hintergrunddienst des Guardian-Systems zur Durchsetzung von Zeitkontingenten und Curfews für Kinder auf Linux-Geräten. Er läuft als systemd-Service mit Root-Rechten und ist modular aufgebaut.
-
+`guardian-daemon` ist der systemweite Hintergrunddienst des Guardian-Systems zur Durchsetzung von Zeitkontingenten
+und Curfews für Kinder auf Linux-Geräten. Er läuft als systemd-Service mit Root-Rechten und ist modular aufgebaut.
 
 ### Bisherige Komponenten
 
@@ -41,7 +48,8 @@
   - Alle Schlüsselaktionen und Fehler werden ins systemd-Journal geloggt.
 
 - **Policy-Loader (`policy.py`)**
-  - Lädt die Konfiguration aus einer YAML-Datei (Pfad über ENV `GUARDIAN_DAEMON_CONFIG` oder Fallback auf `config.yaml`).
+  - Lädt die Konfiguration aus einer YAML-Datei (Pfad über ENV `GUARDIAN_DAEMON_CONFIG` oder
+    Fallback auf `config.yaml`).
   - Stellt Methoden zum Zugriff auf Nutzer- und Default-Policies bereit.
 
 - **Storage (`storage.py`)**
@@ -62,8 +70,6 @@
   - Policy und Storage werden zentral übergeben.
   - PAM-Regeln werden beim Start gesetzt.
   - Session-Tracking läuft asynchron.
-
-
 
 ## Noch offene Schritte & TODOs
 
@@ -88,26 +94,27 @@
   - Schreibe Unit- und Integrationstests für alle Kernmodule.
   - Mock DBus und systemd für lokale Tests.
 
-
-
-
 ## Roadmap / Phasen
 
-**Phase 0 — Lokal (pro Gerät)**
+### Phase 0 — Lokal (pro Gerät)
+
 - Daemon (systemd), Policy-Loader, PAM-Zeitfenster, logind-Watcher, Timer für Curfew/Reset.
 - guardianctl (CLI).
 
-**Phase 1 — Hub (MVP)**
+### Phase 1 — Hub (MVP)
+
 - Server mit Policies, Usage, Sessions, API.
 - Geräte-Enrollment, Pull von Policies, Heartbeats.
 - Tagesreset serverseitig.
 
-**Phase 2 — Multi-Device & Push**
+### Phase 2 — Multi-Device & Push
+
 - WebSocket Push: sofortige Terminierung auf allen Geräten.
 - Konfliktlösung + Offline-Deltas.
 - Eltern-Dashboard mit Live-Status.
 
-**Phase 3 — Komfort & Härtung**
+### Phase 3 — Komfort & Härtung
+
 - Rollen/Mehrere Eltern, 2FA, Benachrichtigungen (Mail/Signal/Matrix).
 - Allowlist/Blocklist für Apps.
 - Kiosk-Mode-Units pro Kind.
@@ -116,22 +123,27 @@
 
 - **guardian.service** (root-Daemon)
 - **guardian.socket** (Admin-IPC, Gruppe `guardian-admin`)
-- **curfew@.service / timer** (Logout pro Kind zu festen Zeiten)
+- **<curfew@.service> / timer** (Logout pro Kind zu festen Zeiten)
 - **daily-reset.service / timer** (Reset Quotas zum konfigurierbaren Zeitpunkt, z.B. 03:00)
-- **gamesession@.service** (optional: Kiosk-Modus für Steam/Gamescope)
+- **<gamesession@.service>** (optional: Kiosk-Modus für Steam/Gamescope)
 - **PAM-Managed Block** in `/etc/security/time.conf`
 
 - **Explizite Nutzerüberwachung:**
-  - Nur Nutzer, die unter `users:` in der Konfiguration eingetragen sind, werden vom Daemon überwacht und erhalten Quota-/Curfew-Regeln.
+  - Nur Nutzer, die unter `users:` in der Konfiguration eingetragen sind, werden vom Daemon überwacht und erhalten
+    Quota-/Curfew-Regeln.
   - Ein leeres Objekt (z.B. `kid2: {}`) bedeutet, dass die Defaults für diesen Nutzer gelten.
   - Alle anderen Nutzer (z.B. Eltern, Admins, Systemkonten) werden ignoriert und sind von den Regeln ausgenommen.
   - Diese Logik muss in allen zukünftigen Komponenten (Enforcement, PAM, systemd, Netzwerk) berücksichtigt werden.
 
-- **Modularität:** Halte die Schnittstellen zwischen Komponenten klar und einfach. Policy und Storage sollten als zentrale Services genutzt werden.
+- **Modularität:** Halte die Schnittstellen zwischen Komponenten klar und einfach. Policy und Storage sollten als
+  zentrale Services genutzt werden.
 - **Konfigurierbarkeit:** Ermögliche das Setzen von Pfaden und Optionen über ENV-Variablen und systemd-Unit-Files.
-- **Sicherheit:** Achte auf sichere Rechtevergabe für IPC und Datenbankzugriffe. Backup und Restore von PAM-Konfigurationen.
-- **Fehlertoleranz:** Bei Fehlern in Policy oder Datenbank nie hart aussperren, sondern Warnungen ausgeben und permissiv weiterarbeiten.
-- **Dokumentation:** Halte die README und die Docstrings aktuell, um die Entwicklung für weitere Mitwirkende zu erleichtern.
+- **Sicherheit:** Achte auf sichere Rechtevergabe für IPC und Datenbankzugriffe. Backup und Restore von
+  PAM-Konfigurationen.
+- **Fehlertoleranz:** Bei Fehlern in Policy oder Datenbank nie hart aussperren, sondern Warnungen ausgeben und
+  permissiv weiterarbeiten.
+- **Dokumentation:** Halte die README und die Docstrings aktuell, um die Entwicklung für weitere Mitwirkende zu
+  erleichtern.
 
 - **Offene Fragen:**
   - Wie werden Notifications technisch ausgelöst (guardian_agent)? DBus, Socket, Kommando?
@@ -140,16 +152,21 @@
   - Wie flexibel und dynamisch sollen PAM-Regeln angepasst werden?
 
 - **Explizite Nutzerüberwachung:**
-  - Nur Nutzer, die unter `users:` in der Konfiguration eingetragen sind, werden vom Daemon überwacht und erhalten Quota-/Curfew-Regeln.
+  - Nur Nutzer, die unter `users:` in der Konfiguration eingetragen sind, werden vom Daemon überwacht und erhalten
+    Quota-/Curfew-Regeln.
   - Ein leeres Objekt (z.B. `kid2: {}`) bedeutet, dass die Defaults für diesen Nutzer gelten.
   - Alle anderen Nutzer (z.B. Eltern, Admins, Systemkonten) werden ignoriert und sind von den Regeln ausgenommen.
   - Diese Logik muss in allen zukünftigen Komponenten (Enforcement, PAM, systemd, Netzwerk) berücksichtigt werden.
 
-- **Modularität:** Halte die Schnittstellen zwischen Komponenten klar und einfach. Policy und Storage sollten als zentrale Services genutzt werden.
+- **Modularität:** Halte die Schnittstellen zwischen Komponenten klar und einfach. Policy und Storage sollten als
+  zentrale Services genutzt werden.
 - **Konfigurierbarkeit:** Ermögliche das Setzen von Pfaden und Optionen über ENV-Variablen und systemd-Unit-Files.
-- **Sicherheit:** Achte auf sichere Rechtevergabe für IPC und Datenbankzugriffe. Backup und Restore von PAM-Konfigurationen.
-- **Fehlertoleranz:** Bei Fehlern in Policy oder Datenbank nie hart aussperren, sondern Warnungen ausgeben und permissiv weiterarbeiten.
-- **Dokumentation:** Halte die README und die Docstrings aktuell, um die Entwicklung für weitere Mitwirkende zu erleichtern.
+- **Sicherheit:** Achte auf sichere Rechtevergabe für IPC und Datenbankzugriffe. Backup und Restore von
+  PAM-Konfigurationen.
+- **Fehlertoleranz:** Bei Fehlern in Policy oder Datenbank nie hart aussperren, sondern Warnungen ausgeben und
+  permissiv weiterarbeiten.
+- **Dokumentation:** Halte die README und die Docstrings aktuell, um die Entwicklung für weitere Mitwirkende zu
+  erleichtern.
 
 ---
 

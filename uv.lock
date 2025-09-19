@@ -130,38 +130,14 @@ source = { virtual = "guardian_hub" }
 
 [[package]]
 name = "guardianctl"
-    { name = "black" },
-    { name = "isort" },
-    { name = "lefthook" },
-    { name = "mypy" },
 version = "0.1.0"
 source = { virtual = "guardianctl" }
 dependencies = [
     { name = "typer" },
 ]
 
-    { name = "black", specifier = ">=25.1.0" },
-    { name = "isort", specifier = ">=6.0.1" },
-    { name = "lefthook", specifier = ">=1.13.1" },
-    { name = "mypy", specifier = ">=1.18.1" },
-[package.dev-dependencies]
-dev = [
-    { name = "black" },
-    { name = "isort" },
-    { name = "lefthook" },
-    { name = "mypy" },
-]
-
 [package.metadata]
 requires-dist = [{ name = "typer", specifier = ">=0.17.4" }]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "black", specifier = ">=25.1.0" },
-    { name = "isort", specifier = ">=6.0.1" },
-    { name = "lefthook", specifier = ">=1.13.1" },
-    { name = "mypy", specifier = ">=1.18.1" },
-]
 
 [[package]]
 name = "isort"

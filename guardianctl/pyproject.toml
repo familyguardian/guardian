@@ -9,11 +9,3 @@ requires-python = ">=3.12"
 dependencies = [
     "typer>=0.17.4",
 ]
-
-[dependency-groups]
-dev = [
-    "black>=25.1.0",
-    "isort>=6.0.1",
-    "lefthook>=1.13.1",
-    "mypy>=1.18.1",
-]
