@@ -6,4 +6,6 @@ authors = [{ name = "Phillip Stockmann", email = "ZyanKLee@users.noreply.github.
 license = "MIT"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "dbus-next>=0.2.3",
+]
