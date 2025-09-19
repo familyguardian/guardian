@@ -96,24 +96,6 @@ name = "guardian-agent"
 version = "0.1.0"
 source = { virtual = "guardian_agent" }
 
-[package.dev-dependencies]
-dev = [
-    { name = "black" },
-    { name = "isort" },
-    { name = "lefthook" },
-    { name = "mypy" },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "black", specifier = ">=25.1.0" },
-    { name = "isort", specifier = ">=6.0.1" },
-    { name = "lefthook", specifier = ">=1.13.1" },
-    { name = "mypy", specifier = ">=1.18.1" },
-]
-
 [[package]]
 name = "guardian-daemon"
 version = "0.1.0"
@@ -146,24 +128,22 @@ name = "guardian-hub"
 version = "0.1.0"
 source = { virtual = "guardian_hub" }
 
-[package.dev-dependencies]
-dev = [
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-]
-
 [[package]]
 name = "guardianctl"
+    { name = "black" },
+    { name = "isort" },
+    { name = "lefthook" },
+    { name = "mypy" },
 version = "0.1.0"
 source = { virtual = "guardianctl" }
 dependencies = [
     { name = "typer" },
 ]
 
+    { name = "black", specifier = ">=25.1.0" },
+    { name = "isort", specifier = ">=6.0.1" },
+    { name = "lefthook", specifier = ">=1.13.1" },
+    { name = "mypy", specifier = ">=1.18.1" },
 [package.dev-dependencies]
 dev = [
     { name = "black" },
