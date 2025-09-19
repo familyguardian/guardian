@@ -1,6 +1,6 @@
 """
-Policy-Loader für guardian-daemon
-Lädt und validiert die Einstellungen aus einer YAML-Konfigurationsdatei.
+Policy loader for guardian-daemon
+Loads and validates settings from a YAML configuration file.
 """
 
 from pathlib import Path
@@ -12,21 +12,17 @@ from guardian_daemon.storage import Storage
 
 
 class Policy:
-    """
-    Lädt und verwaltet die Guardian-Policy aus einer YAML-Konfigurationsdatei und synchronisiert sie mit der Datenbank.
-    Stellt Methoden zum Zugriff auf Nutzer- und Default-Settings bereit.
-    """
 
     def __init__(
         self, config_path: Optional[str] = None, db_path: Optional[str] = None
     ):
         """
-        Initialisiert die Policy-Instanz.
-        Liest die Konfiguration aus einer YAML-Datei und synchronisiert sie mit der Datenbank.
+        Initializes the Policy instance.
+        Reads the configuration from a YAML file and synchronizes it with the database.
 
         Args:
-            config_path (str, optional): Pfad zur YAML-Konfigurationsdatei.
-            db_path (str, optional): Pfad zur SQLite-Datenbank.
+            config_path (str, optional): Path to the YAML configuration file.
+            db_path (str, optional): Path to the SQLite database.
         """
         import os
 
@@ -44,25 +40,25 @@ class Policy:
 
     def get_user_policy(self, username: str) -> Optional[Dict[str, Any]]:
         """
-        Gibt die Policy-Einstellungen für einen bestimmten Nutzer zurück.
+        Return the policy settings for a specific user.
 
         Args:
-            username (str): Nutzername
+            username (str): Username
 
         Returns:
-            dict | None: Die Einstellungen des Nutzers oder None, falls nicht vorhanden.
+            dict | None: The user's settings or None if not present.
         """
         return self.storage.get_user_settings(username)
 
     def get_default(self, key: str) -> Any:
         """
-        Gibt einen Default-Wert aus der Policy zurück.
+        Return a default value from the policy.
 
         Args:
-            key (str): Name des Default-Keys
+            key (str): Name of the default key
 
         Returns:
-            Any: Der Default-Wert oder None
+            Any: The default value or None
         """
         defaults = self.storage.get_user_settings("default")
         if defaults:
@@ -71,16 +67,16 @@ class Policy:
 
     def get_timezone(self) -> str:
         """
-        Gibt die konfigurierte Zeitzone zurück.
+        Return the configured timezone.
 
         Returns:
-            str: Zeitzone (z.B. "Europe/Berlin")
+            str: Timezone (e.g. "Europe/Berlin")
         """
         return self.data.get("timezone", "Europe/Berlin")
 
     def reload(self):
         """
-        Lädt die Policy-Konfiguration neu und synchronisiert sie mit der Datenbank.
+        Reload the policy configuration and synchronize with the database.
         """
 
         with open(self.config_path, "r") as f:
@@ -88,10 +84,10 @@ class Policy:
         self.storage.sync_config_to_db(self.data)
 
 
-# Beispiel für die Nutzung
+# Example usage
 if __name__ == "__main__":
     policy = Policy("config.yaml")
     print("Timezone:", policy.get_timezone())
     print("Default Quota:", policy.get_default("daily_quota_minutes"))
-    print("Policy für kid1:", policy.get_user_policy("kid1"))
+    print("Policy for kid1:", policy.get_user_policy("kid1"))
 # Policy models (pydantic)

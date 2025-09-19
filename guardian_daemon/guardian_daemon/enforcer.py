@@ -1,6 +1,6 @@
 """
-Enforcement-Modul für guardian-daemon
-Prüft Quota und Curfew, erzwingt Limits durch Session-Beendigung und Login-Sperre.
+Enforcement module for guardian-daemon
+Checks quota and curfew, enforces limits by terminating sessions and blocking logins.
 """
 
 from guardian_daemon.policy import Policy
@@ -8,36 +8,43 @@ from guardian_daemon.sessions import SessionTracker
 
 
 class Enforcer:
+    """
+    Enforcement logic for quota and curfew. Handles session termination and user notifications.
+    """
+
     def __init__(self, policy: Policy, tracker: SessionTracker):
+        """
+        Initialize the Enforcer with a policy and session tracker.
+        """
         self.policy = policy
         self.tracker = tracker
 
     def enforce_user(self, username):
         """
-        Prüft Quota und Curfew für einen Nutzer und erzwingt ggf. Maßnahmen.
+        Checks quota and curfew for a user and enforces actions if necessary.
         """
-        # Quota Enforcement
+        # Quota enforcement
         if not self.tracker.check_quota(username):
-            self.notify_user(username, "Quota erreicht! Deine Grace-Zeit beginnt.")
-            # TODO: Grace-Minutes Timer/Countdown
-            # TODO: Notification vor Ablauf der Grace-Zeit
-            # Nach Ablauf der Grace-Zeit:
+            self.notify_user(username, "Quota reached! Your grace period begins.")
+            # TODO: Grace-minutes timer/countdown
+            # TODO: Notification before grace period ends
+            # After grace period:
             self.terminate_session(username)
-            self.notify_user(username, "Deine Sitzung wird jetzt beendet.")
+            self.notify_user(username, "Your session will now be terminated.")
 
-        # Curfew Enforcement (optional, z.B. via PAMManager)
-        # TODO: Curfew-Check und ggf. Login sperren
+        # Curfew enforcement (optional, e.g. via PAMManager)
+        # TODO: Curfew check and block login if necessary
 
     def terminate_session(self, username):
         """
-        Beendet alle laufenden Sessions des Nutzers (z.B. via systemd oder loginctl).
+        Terminates all running sessions of the user (e.g. via systemd or loginctl).
         """
-        # TODO: Integration mit systemd/loginctl
-        print(f"[ENFORCE] Beende alle Sessions für {username}")
+        # TODO: Integration with systemd/loginctl
+        print(f"[ENFORCE] Terminating all sessions for {username}")
 
     def notify_user(self, username, message, category="info"):
         """
-        Sendet eine Desktop-Notification an alle passenden Agenten des angegebenen Nutzers (via D-Bus).
+        Sends a desktop notification to all matching agents of the given user (via D-Bus).
         """
         try:
             import asyncio
@@ -66,7 +73,7 @@ class Enforcer:
                         if agent_username == username:
                             await iface.call_notify_user(message, category)
                             print(
-                                f"[NOTIFY] Nachricht an Agent {obj_path} für Nutzer {username} gesendet."
+                                f"[NOTIFY] Message sent to Agent {obj_path} for user {username}."
                             )
                             notified = True
                     except DBusError:
@@ -74,7 +81,7 @@ class Enforcer:
                     except Exception as e:
                         print(f"[NOTIFY ERROR] Agent {obj_path}: {e}")
                 if not notified:
-                    print(f"[NOTIFY] Kein Agent für Nutzer {username} erreichbar.")
+                    print(f"[NOTIFY] No Agent for user {username} reachable.")
 
             asyncio.run(send())
         except Exception as e:

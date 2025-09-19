@@ -16,7 +16,7 @@ IPC_SOCKET = "/run/guardian-daemon.sock"
 
 def ipc_call(command, **kwargs):
     """
-    Sendet einen IPC-Befehl an den Daemon und gibt die Antwort zurück.
+    Send an IPC command to the daemon and return the response.
     """
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.connect(IPC_SOCKET)
@@ -28,7 +28,7 @@ def ipc_call(command, **kwargs):
 
 def get_ipc_commands():
     """
-    Holt die verfügbaren IPC-Kommandos und deren Parameter vom Daemon.
+    Retrieve available IPC commands and their parameters from the daemon.
     """
     resp = ipc_call("describe_commands")
     return json.loads(resp)
@@ -38,7 +38,14 @@ def get_ipc_commands():
 for cmd, meta in get_ipc_commands().items():
 
     def make_cmd(cmd_name, params):
+        """
+        Create a Typer command for the given IPC command name and parameters.
+        """
+
         def _cmd(**kwargs):
+            """
+            Execute the IPC command and print the result.
+            """
             result = ipc_call(cmd_name, **kwargs)
             typer.echo(result)
 

@@ -1,7 +1,7 @@
 def main():
     """
-    Einstiegspunkt für guardian-hub.
-    Startet den zentralen Server für Policies und Monitoring.
+    Entry point for guardian-hub.
+    Starts the central server for policy management and monitoring.
     """
     print("Hello from guardian-hub!")
 

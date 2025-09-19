@@ -7,16 +7,16 @@ from guardian_daemon.policy import Policy
 
 class GuardianIPCServer:
     """
-    IPC-Server für Admin-Kommandos des Guardian-Daemon.
-    Stellt eine Socket-Schnittstelle für Status- und Steuerbefehle bereit.
+    IPC server for admin commands of the Guardian Daemon.
+    Provides a socket interface for status and control commands.
     """
 
     def __init__(self, config):
         """
-        Initialisiert den IPC-Server und öffnet den Unix-Socket.
+        Initializes the IPC server and opens the Unix socket.
 
         Args:
-            config (dict): Konfigurationsdaten
+            config (dict): Configuration data
         """
         self.policy = Policy()
         self.socket_path = config.get("ipc_socket", "/run/guardian-daemon.sock")
@@ -32,12 +32,12 @@ class GuardianIPCServer:
             "list_timers": self.handle_list_timers,
             "reload_timers": self.handle_reload_timers,
             "reset_quota": self.handle_reset_quota,
-            "describe_commands": self.handle_describe_commands,  # <--- NEU
+            "describe_commands": self.handle_describe_commands,  # <--- NEW
         }
 
     def serve_once(self):
         """
-        Wartet auf einen eingehenden Befehl, führt den passenden Handler aus und sendet die Antwort zurück.
+        Waits for an incoming command, executes the appropriate handler, and sends the response back.
         """
         conn, _ = self.server.accept()
         data = conn.recv(1024).decode().strip()
@@ -53,23 +53,22 @@ class GuardianIPCServer:
 
     def handle_list_kids(self, _):
         """
-        Gibt die Liste aller Kinder (Nutzer) zurück.
+        Returns the list of all kids (users).
         """
         kids = self.policy.storage.get_all_usernames()
         return json.dumps({"kids": kids})
 
     def handle_get_quota(self, kid):
         """
-        Gibt den aktuellen Quota-Stand eines Kindes zurück.
+        Returns the current quota status of a kid.
 
         Args:
-            kid (str): Nutzername
+            kid (str): Username
         """
         if not kid:
             return json.dumps({"error": "missing kid"})
         from guardian_daemon.sessions import SessionTracker
 
-        # Reiche die zentrale Konfiguration weiter
         tracker = SessionTracker(self.policy, self.config)
         user_policy = self.policy.get_user_policy(kid)
         if user_policy is None:
@@ -91,7 +90,7 @@ class GuardianIPCServer:
             last_reset = today_reset
         storage = tracker.storage
         sessions = storage.get_sessions_for_user(kid, since=last_reset.timestamp())
-        used = sum((s[6] for s in sessions)) / 60  # Minuten
+        used = sum((s[6] for s in sessions)) / 60  # Minutes
         for session in tracker.active_sessions.values():
             if session["username"] == kid:
                 used += (
@@ -109,10 +108,10 @@ class GuardianIPCServer:
 
     def handle_get_curfew(self, kid):
         """
-        Gibt die aktuellen Curfew-Zeiten eines Kindes zurück.
+        Returns the current curfew times of a kid.
 
         Args:
-            kid (str): Nutzername
+            kid (str): Username
         """
         if not kid:
             return json.dumps({"error": "missing kid"})
@@ -126,7 +125,7 @@ class GuardianIPCServer:
 
     def handle_list_timers(self, _):
         """
-        Listet alle aktiven Guardian-Timer.
+        Lists all active Guardian timers.
         """
         from guardian_daemon.systemd_manager import SYSTEMD_PATH
 
@@ -138,7 +137,7 @@ class GuardianIPCServer:
 
     def handle_reload_timers(self, _):
         """
-        Lädt die Timer-Konfiguration neu.
+        Reloads the timer configuration.
         """
         from guardian_daemon.systemd_manager import SystemdManager
 
@@ -148,7 +147,7 @@ class GuardianIPCServer:
 
     def handle_reset_quota(self, _):
         """
-        Setzt das Tageskontingent für alle Nutzer zurück (löscht Sessions ab letztem Reset).
+        Resets the daily quota for all users (deletes sessions since last reset).
         """
         import datetime
 
@@ -167,13 +166,11 @@ class GuardianIPCServer:
 
     def handle_describe_commands(self, _):
         """
-        Gibt eine Beschreibung aller verfügbaren IPC-Kommandos und deren Parameter als JSON zurück.
+        Returns a description of all available IPC commands and their parameters as JSON.
         """
         commands = {}
         for cmd, handler in self.handlers.items():
-            # Docstring als Beschreibung
             desc = handler.__doc__.strip() if handler.__doc__ else ""
-            # Parameter aus Funktionsdefinition (außer self)
             import inspect
 
             sig = inspect.signature(handler)
@@ -187,7 +184,7 @@ class GuardianIPCServer:
 
     def close(self):
         """
-        Schließt den IPC-Socket und entfernt die Socket-Datei.
+        Closes the IPC socket and removes the socket file.
         """
         self.server.close()
         if os.path.exists(self.socket_path):

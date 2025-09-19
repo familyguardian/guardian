@@ -8,16 +8,29 @@ from dbus_next.service import ServiceInterface, method
 
 
 class GuardianAgentInterface(ServiceInterface):
+    """
+    D-Bus service interface for Guardian Agent notifications.
+    """
+
     def __init__(self, username):
+        """
+        Initialize the GuardianAgentInterface with the given username.
+        """
         super().__init__("org.guardian.Agent")
         self.username = username
 
     @method()
     async def GetUsername(self) -> str:
+        """
+        Return the username registered with this agent instance.
+        """
         return self.username
 
     @method()
     async def NotifyUser(self, message: str, category: str = "info"):
+        """
+        Show a desktop notification to the user with the given message and category.
+        """
         categories = {
             "info": {"urgency": "low", "expire": "10000", "icon": "dialog-information"},
             "warning": {
@@ -49,13 +62,16 @@ class GuardianAgentInterface(ServiceInterface):
 
 
 async def main():
+    """
+    Main entry point for the Guardian Agent. Registers the D-Bus interface and runs the event loop.
+    """
     bus = await MessageBus().connect()
     username = getpass.getuser()
     import fcntl
 
     obj_path = os.environ.get("GUARDIAN_AGENT_PATH")
     if not obj_path:
-        # Automatische Sessionnummerierung mit Cleanup verwaister Einträge
+        # Automatic session numbering with cleanup of orphaned entries
         import psutil
 
         lock_path = os.path.join(os.path.dirname(__file__), "agent_path_lock.txt")
@@ -70,21 +86,21 @@ async def main():
                 parts = line.strip().split()
                 if len(parts) == 2:
                     pid = int(parts[1])
-                    # Prüfe, ob PID existiert
+                    # Check if PID exists
                     if psutil.pid_exists(pid):
                         used.add(int(parts[0]))
                         valid_lines.append(line)
-            # Schreibe nur gültige Einträge zurück
+            # Write back only valid entries
             lock_file.seek(0)
             lock_file.truncate()
             for line in valid_lines:
                 lock_file.write(line)
-            # Finde die kleinste freie Nummer
+            # Find the lowest available number
             for n in range(1, 100):
                 if n not in used:
                     session_num = n
                     break
-            # Schreibe eigene Sessionnummer und PID
+            # Write own session number and PID
             lock_file.write(f"{session_num} {os.getpid()}\n")
             fcntl.flock(lock_file, fcntl.LOCK_UN)
         if session_num == 1:
@@ -99,7 +115,7 @@ async def main():
     try:
         await asyncio.Future()  # run forever
     finally:
-        # Entferne Lock-Eintrag beim Beenden
+        # Remove lock entry on exit
         lock_path = os.path.join(os.path.dirname(__file__), "agent_path_lock.txt")
         try:
             with open(lock_path, "r+") as lock_file:

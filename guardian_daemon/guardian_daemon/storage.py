@@ -9,9 +9,13 @@ from typing import Optional
 
 
 class Storage:
+    """
+    Central SQLite interface for session and settings storage in Guardian Daemon.
+    """
+
     def get_user_settings(self, username: str):
         """
-        Gibt die Settings für einen Nutzer zurück.
+        Retrieve user settings from the database for the given username.
 
         Args:
             username (str): Nutzername
@@ -28,7 +32,7 @@ class Storage:
 
     def set_user_settings(self, username: str, settings: dict):
         """
-        Setzt die Settings für einen Nutzer.
+        Store user settings in the database for the given username.
 
         Args:
             username (str): Nutzername
@@ -43,7 +47,7 @@ class Storage:
 
     def update_session_logout(self, session_id: str, end_time: float, duration: float):
         """
-        Aktualisiert end_time und duration für eine Session beim Logout.
+        Update session entry with logout time and duration.
         """
         c = self.conn.cursor()
         c.execute(
@@ -54,14 +58,9 @@ class Storage:
         )
         self.conn.commit()
 
-    """
-    Zentrale SQLite-Schnittstelle für guardian-daemon.
-    Verwaltet Sessions und Nutzer-Settings.
-    """
-
     def __init__(self, db_path: str):
         """
-        Initialisiert die Storage-Instanz und öffnet die Datenbank.
+        Initialize the Storage with the given database path.
 
         Args:
             db_path (str): Pfad zur SQLite-Datenbank.
@@ -72,7 +71,7 @@ class Storage:
 
     def _init_db(self):
         """
-        Legt die benötigten Tabellen in der Datenbank an, falls sie nicht existieren. Setzt PRAGMA und nutzt Transaktion.
+        Initialize the SQLite database schema if not present.
         """
         try:
             with self.conn:
@@ -106,7 +105,7 @@ class Storage:
 
     def sync_config_to_db(self, config: dict):
         """
-        Überträgt die Einstellungen aus der Config in die Datenbank, falls sie dort noch nicht existieren.
+        Synchronize configuration data to the database.
 
         Args:
             config (dict): Konfigurationsdaten
@@ -118,7 +117,7 @@ class Storage:
         # Users abgleichen
         for username, settings in config.get("users", {}).items():
             if self.get_user_settings(username) is None:
-                # Falls settings leer, speichere default
+                # If settings are empty, save default
                 if not settings:
                     settings = config.get("defaults", {})
                 self.set_user_settings(username, settings)
@@ -135,17 +134,17 @@ class Storage:
         service: Optional[str] = None,
     ):
         """
-        Fügt eine neue Session in die Datenbank ein.
+        Adds a new session to the database.
 
         Args:
-            session_id (str): Session-ID
-            username (str): Nutzername
-            uid (int): User-ID
-            start_time (float): Startzeitpunkt
-            end_time (float): Endzeitpunkt
-            duration (float): Sitzungsdauer
-            desktop (str, optional): Desktop-Umgebung
-            service (str, optional): Service (z.B. sddm)
+            session_id (str): Session ID
+            username (str): Username
+            uid (int): User ID
+            start_time (float): Start time
+            end_time (float): End time
+            duration (float): Session duration
+            desktop (str, optional): Desktop environment
+            service (str, optional): Service (e.g. sddm)
         """
         c = self.conn.cursor()
         c.execute(
@@ -168,14 +167,14 @@ class Storage:
 
     def get_sessions_for_user(self, username: str, since: Optional[float] = None):
         """
-        Gibt alle Sessions eines Nutzers zurück, optional ab einem bestimmten Zeitpunkt.
+        Retrieve all sessions for a user, optionally since a specific time.
 
         Args:
-            username (str): Nutzername
-            since (float, optional): Startzeitpunkt (Unix-Timestamp)
+            username (str): Username
+            since (float, optional): Start time (Unix timestamp)
 
         Returns:
-            list: Liste der Sessions
+            list: List of sessions
         """
         c = self.conn.cursor()
         if since:
@@ -189,10 +188,10 @@ class Storage:
 
     def get_all_usernames(self):
         """
-        Gibt alle Nutzernamen (außer 'default') aus der Datenbank zurück.
+        Return all usernames (except 'default') from the database.
 
         Returns:
-            list: Liste der Nutzernamen
+            list: List of usernames
         """
         c = self.conn.cursor()
         c.execute("SELECT username FROM user_settings WHERE username != 'default'")
@@ -200,7 +199,7 @@ class Storage:
 
     def delete_sessions_since(self, since: float):
         """
-        Löscht alle Sessions ab einem bestimmten Zeitpunkt.
+        Delete all sessions from the database since the given timestamp.
 
         Args:
             since (float): Startzeitpunkt (Unix-Timestamp)
@@ -211,7 +210,7 @@ class Storage:
 
     def close(self):
         """
-        Schließt die Datenbankverbindung.
+        Close the database connection.
         """
         self.conn.close()
 

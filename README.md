@@ -1,152 +1,136 @@
-# Guardian – Architektur- und Systemkonzept
+# Guardian – Architecture and System Concept
 
-## Übersicht
+## Overview
 
-Guardian ist ein Multi-Device-Parental-Control-System für Linux, das Zeitkontingente,
-Curfews und geräteübergreifende Nutzungsgrenzen für Kinder durchsetzt. Die Architektur
-ist modular und besteht aus mehreren Python-Unterprojekten, die gemeinsam in einem
-Monorepo entwickelt werden.
+Guardian is a multi-device parental control system for Linux that enforces time quotas, curfews, and cross-device usage
+limits for children. The architecture is modular and consists of several Python subprojects developed together in a monorepo.
 
 ---
 
-## Dynamik & Robustheit
+## Dynamics & Robustness
 
-- **Config-Reload:** Die Konfiguration wird im Daemon periodisch (z.B. alle 5 Minuten)
-  neu eingelesen. Änderungen werden automatisch erkannt und führen zu einer
-  Aktualisierung der systemd-Timer und PAM-Regeln.
-- **Dynamische Anpassung:** Timer und Login-Regeln werden bei Policy-Änderungen sofort
-  angepasst, ohne Neustart des Daemons.
-- **Timer-Nachholen:** Falls der Rechner zum Reset-Zeitpunkt nicht läuft, wird der
-  Tagesreset beim nächsten Start nachgeholt.
-- **Logging:** Alle Schlüsselaktionen und Fehler werden ins systemd-Journal geloggt, um
-  Betrieb und Debugging zu erleichtern.
+- **Config Reload:** The configuration is periodically reloaded in the daemon (e.g., every 5 minutes). Changes are
+  automatically detected and lead to an update of systemd timers and PAM rules.
+- **Dynamic Adjustment:** Timers and login rules are immediately adjusted when policies change, without restarting the daemon.
+- **Timer Catch-Up:** If the computer is not running at the reset time, the daily reset is performed at the next startup.
+- **Logging:** All key actions and errors are logged to the systemd journal to facilitate operation and debugging.
 
-Dieses Monorepo ist für die Entwicklung mit [Visual Studio Code](https://code.visualstudio.com/)
-und [DevContainers](https://containers.dev/) optimiert. Die DevContainer-Konfiguration
-sorgt für eine konsistente Umgebung mit vorinstalliertem Python, Node.js, Git und UV als
-Paketmanager und Script-Runner.
+This monorepo is optimized for development with [Visual Studio Code](https://code.visualstudio.com/) and
+[DevContainers](https://containers.dev/). The DevContainer configuration ensures a consistent environment with
+pre-installed Python, Node.js, Git, and UV as package manager and script runner.
 
-### Struktur & Dependency-Management
+### Structure & Dependency Management
 
-- **Jedes Unterprojekt** (`guardian_daemon`, `guardianctl`, `guardian_agent`,
-  `guardian_hub`, etc.) besitzt ein eigenes `pyproject.toml` für Abhängigkeiten und
-  Metadaten.
-- Das Monorepo wird über einen zentralen Workspace in [`pyproject.toml`](pyproject.toml)
-  verwaltet.
-- **UV** wird als Paketmanager und Script-Runner für alle Unterprojekte verwendet.
+- **Each subproject** (`guardian_daemon`, `guardianctl`, `guardian_agent`, `guardian_hub`, etc.) has its own
+  `pyproject.toml` for dependencies and metadata.
+- The monorepo is managed via a central workspace in [`pyproject.toml`](pyproject.toml).
+- **UV** is used as the package manager and script runner for all subprojects.
 
-### Typischer Workflow
+### Typical Workflow
 
-1. **DevContainer öffnen**  
-   Öffne das Repository in VSCode und wähle „Reopen in Container“. Die Umgebung wird
-   automatisch eingerichtet.
+1. **Open DevContainer**  
+   Open the repository in VSCode and select "Reopen in Container". The environment is set up automatically.
 
-2. **VirtualEnv pro Unterprojekt**  
-   UV erstellt und verwaltet automatisch isolierte VirtualEnvs je Unterprojekt.  
-   Beispiel für das Daemon-Projekt:
+2. **VirtualEnv per subproject**  
+   UV automatically creates and manages isolated virtualenvs for each subproject.  
+   Example for the daemon project:
 
    ```sh
    cd guardian_daemon
    uv venv
    ```
 
-3. **Dependencies installieren**  
-   Im jeweiligen Unterprojekt:
+3. **Install dependencies**  
+   In the respective subproject:
 
    ```sh
-   uv pip install -r requirements.txt  # falls requirements.txt existiert
-   # oder direkt aus pyproject.toml:
+   uv pip install -r requirements.txt  # if requirements.txt exists
+   # or directly from pyproject.toml:
    uv pip install .
    ```
 
-4. **Dependencies updaten**  
-   Im jeweiligen Unterprojekt:
+4. **Update dependencies**  
+   In the respective subproject:
 
    ```sh
    uv pip upgrade
    ```
 
-5. **Scripts ausführen**  
-   UV kann auch als Script-Runner genutzt werden:
+5. **Run scripts**  
+   UV can also be used as a script runner:
 
    ```sh
    uv run main.py
    ```
 
-6. **Entwicklung im Monorepo**  
-   - Änderungen an Abhängigkeiten werden pro Unterprojekt im jeweiligen `pyproject.toml`
-   gepflegt.
-   - UV erkennt die Workspace-Struktur und installiert Abhängigkeiten nur für das aktive
-   Unterprojekt.
-   - Die DevContainer-Umgebung sorgt für konsistente Python-Versionen und Tools.
+6. **Development in the monorepo**  
+   - Changes to dependencies are maintained per subproject in the respective `pyproject.toml`.
+   - UV recognizes the workspace structure and installs dependencies only for the active subproject.
+   - The DevContainer environment ensures consistent Python versions and tools.
 
-### Vorteile
+### Advantages
 
-- **Isolierte Environments**: Keine Abhängigkeitskonflikte zwischen Unterprojekten.
-- **Schnelle Installation & Updates**: UV ist deutlich schneller als pip und Poetry.
-- **Einheitlicher Workflow**: Alle Entwickler:innen nutzen die gleiche Umgebung und Tools.
+- **Isolated environments:** No dependency conflicts between subprojects.
+- **Fast installation & updates:** UV is much faster than pip and Poetry.
+- **Unified workflow:** All developers use the same environment and tools.
 
 ---
 
-## Ziele
+## Goals
 
-- **Saubere Trennung pro Kind** durch eigene Linux-Konten.  
-- **Zeitfenster & Tageskontingente** (ähnlich Google Family Link oder Amazon Eltern
-  Dashboard).  
-- **Geräteübergreifende Kontrolle**: Limits gelten über alle Laptops, Tower und Steam  
-  Decks hinweg.  
-- **Eltern-Dashboard** (Web + CLI) zur Verwaltung und Überwachung.  
-- **Robustheit**: auch bei Offline-Betrieb Enforcement lokal, bei Reconnect Sync mit
-  zentralem Server.  
+- **Clean separation per child** through individual Linux accounts.  
+- **Time windows & daily quotas** (similar to Google Family Link or Amazon Parent Dashboard).  
+- **Cross-device control:** Limits apply across all laptops, towers, and Steam Decks.  
+- **Parent dashboard** (Web + CLI) for management and monitoring.  
+- **Robustness:** Enforcement locally even when offline, sync with central server upon reconnect.  
 
 ---
 
-## Systemkomponenten
+## System Components
 
-### guardian-daemon (Device-Agent)
+### guardian-daemon (Device Agent)
 
-- Python-Daemon, läuft als **systemd-Service** (root).
-- Beobachtet Logins/Sitzungen via **systemd-logind (DBus)**.
-- Zählt **tatsächlich genutzte Zeit** pro Kind (monotonic clock).
-- Erzwingt **Quota & Curfews** (Login-Sperre, Live-Enforcement).
-- Erstellt/verwaltet **systemd-Timer/Units** & **PAM-Regeln**.
-- Kommuniziert mit zentralem Server (guardian-hub).
+- Python daemon, runs as a **systemd service** (root).
+- Monitors logins/sessions via **systemd-logind (DBus)**.
+- Tracks **actual usage time** per child (monotonic clock).
+- Enforces **quota & curfews** (login block, live enforcement).
+- Creates/manages **systemd timers/units** & **PAM rules**.
+- Communicates with central server (guardian-hub).
 
 ### guardianctl (CLI)
 
-- Admin-Werkzeug (Python Typer): Policies anzeigen, Bonuszeit vergeben, Limits setzen,
-  System neu generieren.
-- Greift über Unix-Domain-Socket auf den Daemon oder über HTTPS auf den Hub zu.
+- Admin tool (Python Typer): View policies, grant bonus time, set limits, regenerate system.
+- Accesses the daemon via Unix domain socket or the hub via HTTPS.
 
-### guardian-agent (optional pro User)
+### guardian-agent (optional per user)
 
-- User-Level-Service, zeigt Benachrichtigungen (DBus/notify-send).
-- Nicht sicherheitskritisch, nur „freundlicher Hinweis“.
+- User-level service, displays notifications (DBus/notify-send).
+- Not security-critical, just a "friendly reminder".
 
-### guardian-hub (Zentralserver)
+### guardian-hub (Central Server)
 
-- **Quelle der Wahrheit** für Policies & Tageskonten.
-- API (HTTP/JSON via FastAPI) + Realtime Push (WebSocket).
-- Datenbank (Postgres für Prod; SQLite MVP).
-- Web-UI (React/Next.js o. ä.): Eltern-Dashboard für Verwaltung und Live-Monitoring.
-- Authentifizierung (Eltern-Login, ggf. 2FA).
-- Audit-Log.
-
----
-
-## Datenmodell
-
-- **users**: Kinder, Linux-UID, Zeitzone, Name.
-- **devices**: registrierte Geräte (Deck, Laptop, Tower).
-- **enrollments**: Zuordnung Nutzer ↔ Geräte.
-- **policies**: Tageskontingente, Curfew-Regeln, Grace-Zeit, App-Allowlist.
-- **sessions**: aktive Sitzungen pro Kind & Gerät.
-- **usage**: Tagesverbrauch pro Kind (geräteübergreifend).
-- **audits**: Änderungen & Aktionen.
+- **Source of truth** for policies & daily accounts.
+- API (HTTP/JSON via FastAPI) + realtime push (WebSocket).
+- Database (Postgres for production; SQLite MVP).
+- Web UI (React/Next.js etc.): Parent dashboard for management and live monitoring.
+- Authentication (parent login, optionally 2FA).
+- Audit log.
 
 ---
 
-## Policy-Beispiel (config.yaml)
+## Data Model
+
+- **users:** Children, Linux UID, timezone, name.
+- **devices:** Registered devices (Deck, Laptop, Tower).
+- **enrollments:** Assignment user ↔ devices.
+- **policies:** Daily quotas, curfew rules, grace period, app allowlist.
+- **sessions:** Active sessions per child & device.
+- **usage:** Daily usage per child (cross-device).
+- **audits:** Changes & actions.
+
+---
+
+## Policy Example (config.yaml)
 
 ```yaml
 timezone: "Europe/Berlin"
@@ -169,113 +153,109 @@ users:
 
 ---
 
-## Enforcement-Strategie
+## Enforcement Strategy
 
-1. **Curfew (Login-Fenster)**  
-   - PAM (`pam_time.so`) blockiert Logins außerhalb erlaubter Zeiten.
+1. **Curfew (Login Window)**  
+   - PAM (`pam_time.so`) blocks logins outside allowed times.
 
-2. **Live-Quota (täglich)**  
-   - Daemon zählt Nutzungszeit über logind.
-   - Bei Erreichen:
-     - Warnung (notify, optional agent).
-     - Grace-Zeit.
-     - Danach `loginctl terminate-user` oder gezielt „Game-Session“ Unit beenden.
+2. **Live Quota (daily)**  
+   - Daemon tracks usage time via logind.
+   - When reached:
+     - Warning (notify, optional agent).
+     - Grace period.
+     - Then `loginctl terminate-user` or specifically terminate "Game-Session" unit.
 
-3. **Geräteübergreifend**  
-   - Jeder Agent sendet Heartbeats mit Verbrauch an Hub.
-   - Hub akkumuliert global und broadcastet „terminate-user“ an **alle aktiven Geräte**.
+3. **Cross-device**  
+   - Each agent sends heartbeats with usage to the hub.
+   - Hub accumulates globally and broadcasts "terminate-user" to **all active devices**.
 
 4. **Reset**  
-   - Server setzt Verbrauch täglich (z. B. 00:05) zurück.
-   - Agents synchronisieren beim nächsten Heartbeat.
+   - Server resets usage daily (e.g., 00:05).
+   - Agents synchronize on next heartbeat.
 
 ---
 
-## Offline-Verhalten & Multi-Device-Vision
+## Offline Behavior & Multi-Device Vision
 
-- Der Daemon cached die letzte Policy und den Verbrauch lokal und erzwingt die Regeln auch
-  ohne Verbindung zum Hub.
-- Bei Reconnect werden die lokalen Nutzungsdaten mit dem Hub synchronisiert (Delta-Sync).
-- Konfliktlösung: Der Server (Hub) ist die Quelle der Wahrheit; der Daemon korrigiert
-  lokale Daten ggf. sofort.
-- Die Architektur ist darauf ausgelegt, Quota und Curfew geräteübergreifend zu
-  synchronisieren und durchzusetzen (Multi-Device).
+- The daemon caches the last policy and usage locally and enforces the rules even without connection to the hub.
+- Upon reconnect, local usage data is synchronized with the hub (delta sync).
+- Conflict resolution: The server (hub) is the source of truth; the daemon immediately corrects local data if necessary.
+- The architecture is designed to synchronize and enforce quota and curfew across devices (multi-device).
 
 ---
 
-## Systemd-Integration (vom Daemon generiert)
+## Systemd Integration (generated by the daemon)
 
-- **guardian.service** (root-Daemon)
-- **guardian.socket** (Admin-IPC, Gruppe `guardian-admin`)
-- **<curfew@.service> / timer** (Logout pro Kind zu festen Zeiten)
-- **daily-reset.service / timer** (Reset Quotas zum konfigurierbaren Zeitpunkt, z.B. 03:00)
-- **<gamesession@.service>** (optional: Kiosk-Modus für Steam/Gamescope)
-- **PAM-Managed Block** in `/etc/security/time.conf`
-- **Automatische Aktivierung und Nachholen von Timern:** Timer werden bei Policy-Änderung
-  automatisch aktualisiert und beim Start nachgeholt, falls sie verpasst wurden.
+- **guardian.service** (root daemon)
+- **guardian.socket** (admin IPC, group `guardian-admin`)
+- **<curfew@.service> / timer** (logout per child at fixed times)
+- **daily-reset.service / timer** (reset quotas at configurable time, e.g., 03:00)
+- **<gamesession@.service>** (optional: kiosk mode for Steam/Gamescope)
+- **PAM-managed block** in `/etc/security/time.conf`
+- **Automatic activation and catch-up of timers:** Timers are automatically updated on policy change and caught up at
+  startup if missed.
 
 ---
 
-## Sicherheit
+## Security
 
-- **Geräte-Enrollment**: Token/PIN oder mTLS.
-- **Transport**: TLS; Auth via JWT + Refresh oder mTLS.
-- **IPC-Socket**: nur für `guardian-admin` Gruppe.
-- **Zeitmessung**: monotonic clock (nicht manipulierbar über Systemzeit).
-- **Fail-safe**: bei Policy/DB-Fehler → permissive Mode mit Warnung (nie hart aussperren
-  wegen Bug).
+- **Device enrollment:** Token/PIN or mTLS.
+- **Transport:** TLS; auth via JWT + refresh or mTLS.
+- **IPC socket:** only for `guardian-admin` group.
+- **Time measurement:** monotonic clock (cannot be manipulated via system time).
+- **Fail-safe:** on policy/DB error → permissive mode with warning (never hard lockout due to bug).
 
 ---
 
 ## Roadmap
 
-**Phase 0 — Lokal (pro Gerät)**  
+**Phase 0 — Local (per device)**  
 
-- Daemon (systemd), Policy-Loader, PAM-Zeitfenster, logind-Watcher, Timer für Curfew/Reset.
+- Daemon (systemd), policy loader, PAM time windows, logind watcher, timer for curfew/reset.
 - guardianctl (CLI).
 
 **Phase 1 — Hub (MVP)**  
 
-- Server mit Policies, Usage, Sessions, API.
-- Geräte-Enrollment, Pull von Policies, Heartbeats.
-- Tagesreset serverseitig.
+- Server with policies, usage, sessions, API.
+- Device enrollment, policy pull, heartbeats.
+- Daily reset server-side.
 
 **Phase 2 — Multi-Device & Push**  
 
-- WebSocket Push: sofortige Terminierung auf allen Geräten.
-- Konfliktlösung + Offline-Deltas.
-- Eltern-Dashboard mit Live-Status.
+- WebSocket push: immediate termination on all devices.
+- Conflict resolution + offline deltas.
+- Parent dashboard with live status.
 
-**Phase 3 — Komfort & Härtung**  
+**Phase 3 — Comfort & Hardening**  
 
-- Rollen/Mehrere Eltern, 2FA, Benachrichtigungen (Mail/Signal/Matrix).
-- Allowlist/Blocklist für Apps.
-- Kiosk-Mode-Units pro Kind.
+- Roles/multiple parents, 2FA, notifications (mail/signal/matrix).
+- Allowlist/blocklist for apps.
+- Kiosk mode units per child.
 
 ---
 
-## Projektstruktur (Python)
+## Project Structure (Python)
 
 ```text
 guardian/
- ├─ guardian_daemon/     # Hauptdaemon (systemd-Service)
+ ├─ guardian_daemon/     # Main daemon (systemd service)
  │   ├─ main.py
- │   ├─ policy.py        # Policy-Modelle (pydantic)
- │   ├─ sessions.py      # logind-Watcher
- │   ├─ enforcer.py      # Quota/Curfew Enforcement
- │   ├─ pam_manager.py   # PAM time.conf Blöcke
+ │   ├─ policy.py        # Policy models (pydantic)
+ │   ├─ sessions.py      # logind watcher
+ │   ├─ enforcer.py      # Quota/curfew enforcement
+ │   ├─ pam_manager.py   # PAM time.conf blocks
  │   ├─ systemd_manager.py
- │   ├─ net_client.py    # API/WebSocket Hub
+ │   ├─ net_client.py    # API/WebSocket hub
  │   ├─ storage.py       # SQLite
- │   └─ ipc.py           # Admin-Socket
- ├─ guardianctl/         # CLI-Tool
+ │   └─ ipc.py           # Admin socket
+ ├─ guardianctl/         # CLI tool
  │   └─ cli.py
- ├─ guardian_agent/      # User-Benachrichtigungen (optional)
- ├─ guardian_hub/        # Zentralserver (FastAPI, DB, Websocket)
+ ├─ guardian_agent/      # User notifications (optional)
+ ├─ guardian_hub/        # Central server (FastAPI, DB, Websocket)
  │   ├─ api.py
  │   ├─ models.py
  │   ├─ db.py
- │   └─ webui/           # React/Next.js Frontend
+ │   └─ webui/           # React/Next.js frontend
  ├─ pyproject.toml
  └─ scripts/
      └─ install_artifacts.py
@@ -283,34 +263,32 @@ guardian/
 
 ---
 
-## Dokumentation bauen
+## Build Documentation
 
-Die zentrale API- und Projektdokumentation wird mit [Sphinx](https://www.sphinx-doc.org/)
-aus allen Unterprojekten generiert.
+The central API and project documentation is generated with [Sphinx](https://www.sphinx-doc.org/) from all subprojects.
 
-### Voraussetzungen
+### Prerequisites
 
-- Alle Python-Abhängigkeiten und Sphinx müssen im DevContainer/venv installiert sein.
-- Die Unterprojekte müssen als Pakete installiert sein (editable install).
+- All Python dependencies and Sphinx must be installed in the DevContainer/venv.
+- The subprojects must be installed as packages (editable install).
 
-### Schritt-für-Schritt
+### Step-by-step
 
-1. **DevContainer öffnen**
-   - Repository in VSCode öffnen und „Reopen in Container“ wählen.
+1. **Open DevContainer**
+   - Open the repository in VSCode and select "Reopen in Container".
 
-2. **Doku bauen**
-   - Im Projekt-Root:
+2. **Build docs**
+   - In the project root:
 
      ```sh
      bash scripts/gen_docs.sh
      ```
 
-   - Das Skript installiert alle Unterprojekte als Pakete und baut die zentrale
-     Sphinx-Dokumentation.
-   - Die fertige HTML-Doku liegt in `docs/_build/html`.
+   - The script installs all subprojects as packages and builds the central Sphinx documentation.
+   - The finished HTML docs are located in `docs/_build/html`.
 
-### Hinweise
+### Notes
 
-- Die Docstrings aus allen Modulen werden automatisch integriert.
-- Statische Seiten und API-Doku sind zentral in `docs/index.rst` gepflegt.
-- Bei Änderungen an Modulen oder Docstrings einfach das Skript erneut ausführen.
+- The docstrings from all modules are automatically integrated.
+- Static pages and API docs are centrally maintained in `docs/index.rst`.
+- After changes to modules or docstrings, simply run the script again.

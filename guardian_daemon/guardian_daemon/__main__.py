@@ -17,14 +17,14 @@ logging.basicConfig(
 
 class GuardianDaemon:
     """
-    Hauptklasse des Guardian-Daemon.
-    Initialisiert alle Kernkomponenten und steuert den Ablauf.
+    Main class of the Guardian Daemon.
+    Initializes all core components and controls the flow.
     """
 
     def __init__(self):
         """
-        Initialisiert Policy, Storage, PAM, Systemd und SessionTracker.
-        Lädt zuerst default-config.yaml, dann config.yaml und überschreibt Werte.
+        Initializes Policy, Storage, PAM, Systemd, and SessionTracker.
+        Loads default-config.yaml first, then config.yaml and overwrites values.
         """
         # Lade Default-Konfiguration
         with open(

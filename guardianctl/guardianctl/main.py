@@ -1,7 +1,7 @@
 def main():
     """
-    Einstiegspunkt für guardianctl.
-    Startet das CLI-Tool für Admin-Kommandos.
+    Entry point for guardianctl.
+    Starts the CLI tool for admin commands.
     """
     print("Hello from guardianctl!")
 

@@ -1,7 +1,7 @@
 """
-Session-Tracking für guardian-daemon
-Überwacht Logins/Logouts via systemd-logind (DBus), misst Nutzungszeit und prüft Quota/Curfew.
-Speichert Daten in SQLite.
+Session tracking for guardian-daemon
+Monitors logins/logouts via systemd-logind (DBus), measures usage time and checks quota/curfew.
+Stores data in SQLite.
 """
 
 import asyncio
@@ -17,17 +17,17 @@ from guardian_daemon.storage import Storage
 
 class SessionTracker:
     """
-    Überwacht und speichert Nutzersessions, prüft Quota und Curfew.
-    Bindet sich an systemd-logind via DBus.
+    Monitors and stores user sessions, checks quota and curfew.
+    Connects to systemd-logind via DBus.
     """
 
     def __init__(self, policy: Policy, config: dict):
         """
-        Initialisiert den SessionTracker.
+        Initialize the SessionTracker with a policy and configuration.
 
         Args:
-            policy (Policy): Policy-Instanz
-            config (dict): Geparste Konfiguration
+            policy (Policy): Policy instance
+            config (dict): Parsed configuration
         """
         self.policy = policy
         db_path = config.get("db_path", "guardian.sqlite")
@@ -38,29 +38,29 @@ class SessionTracker:
 
     def handle_login(self, session_id, uid, username, props):
         """
-        Registriert eine neue Session beim Login, aber nur für Kinder-Accounts.
+        Register a new session on login for child accounts.
 
         Args:
-            session_id (str): Session-ID
-            uid (int): User-ID
-            username (str): Nutzername
+            session_id (str): Session ID
+            uid (int): User ID
+            username (str): Username
         """
         kids = set(self.policy.data.get("users", {}).keys())
         if username not in kids:
-            print(f"Ignoriere Session von {username} (UID {uid}) Session {session_id}")
+            print(f"Ignoring session from {username} (UID {uid}) Session {session_id}")
             return
         self.active_sessions[session_id] = {
             "uid": uid,
             "username": username,
             "start_time": time.monotonic(),
         }
-        # Debug-Ausgabe aller Infos vor dem Schreiben
+        # Debug output of all info before writing
         desktop = props.get("Desktop", None)
         service = props.get("Service", None)
         print(
-            f"[DEBUG] Schreibe Session in DB: session_id={session_id}, username={username}, uid={uid}, start_time={self.active_sessions[session_id]['start_time']}, end_time=0.0, duration=0.0, desktop={desktop}, service={service}"
+            f"[DEBUG] Writing session to DB: session_id={session_id}, username={username}, uid={uid}, start_time={self.active_sessions[session_id]['start_time']}, end_time=0.0, duration=0.0, desktop={desktop}, service={service}"
         )
-        # Session-Eintrag mit end_time und duration=0 erstellen
+        # Create session entry with end_time and duration=0
         self.storage.add_session(
             session_id,
             username,
@@ -75,41 +75,41 @@ class SessionTracker:
 
     def handle_logout(self, session_id):
         """
-        Beendet eine Session beim Logout und speichert sie in der Datenbank (nur für Kinder-Accounts).
+        End a session on logout and save it in the database for child accounts.
 
         Args:
-            session_id (str): Session-ID
+            session_id (str): Session ID
         """
         session = self.active_sessions.pop(session_id, None)
         if session:
             kids = set(self.policy.data.get("users", {}).keys())
             if session["username"] not in kids:
                 print(
-                    f"Ignoriere Logout von {session['username']} Session {session_id}"
+                    f"Ignoring logout from {session['username']} Session {session_id}"
                 )
                 return
             end_time = time.monotonic()
             duration = end_time - session["start_time"]
-            # Debug-Ausgabe aller Infos vor dem Update
+            # Debug output of all info before update
             print(
-                f"[DEBUG] Update Session in DB: session_id={session_id}, username={session['username']}, uid={session['uid']}, start_time={session['start_time']}, end_time={end_time}, duration={duration}"
+                f"[DEBUG] Update session in DB: session_id={session_id}, username={session['username']}, uid={session['uid']}, start_time={session['start_time']}, end_time={end_time}, duration={duration}"
             )
-            # Session-Eintrag aktualisieren
+            # Update session entry
             self.storage.update_session_logout(session_id, end_time, duration)
             print(
-                f"Logout: {session['username']} Session {session_id} Dauer: {duration:.1f}s"
+                f"Logout: {session['username']} Session {session_id} Duration: {duration:.1f}s"
             )
 
     def check_quota(self, username):
         """
-        Summiert alle Sessions seit dem letzten Reset-Zeitpunkt und prüft gegen das Tageskontingent.
-        Gibt True zurück, wenn noch Zeit übrig ist, sonst False.
+        Sum all sessions since the last reset and check against the daily quota.
+        Returns True if time remains, otherwise False.
 
         Args:
-            username (str): Nutzername
+            username (str): Username
 
         Returns:
-            bool: True wenn noch Zeit übrig, False wenn Limit erreicht
+            bool: True if time remains, False if limit reached
         """
         user_policy = self.policy.get_user_policy(username)
         if user_policy is None:
@@ -134,10 +134,10 @@ class SessionTracker:
         sessions = self.storage.get_sessions_for_user(
             username, since=last_reset.timestamp()
         )
-        # Filter: Nur Sessions mit sinnvoller Dauer (> 0.5 min) und ggf. keine SDDM/Service-Logins
+        # Filter: Only sessions with meaningful duration (> 0.5 min) and optionally no SDDM/service logins
         filtered_sessions = [
             s for s in sessions if s[6] > 30
-        ]  # s[6] = duration (Sekunden), >30s
+        ]  # s[6] = duration (seconds), >30s
         total_minutes = sum((s[6] for s in filtered_sessions)) / 60
 
         for session in self.active_sessions.values():
@@ -148,7 +148,7 @@ class SessionTracker:
 
     async def run(self):
         """
-        Startet das Session-Tracking und bindet sich an systemd-logind via DBus.
+        Start session tracking and connect to systemd-logind via DBus.
         """
         from dbus_next.constants import BusType
 
@@ -180,6 +180,10 @@ class SessionTracker:
             return username, uid
 
         def session_new_handler(session_id, object_path):
+            """
+            Handle new session event.
+            """
+
             async def inner():
                 # Session-Objekt holen
                 session_obj = bus.get_proxy_object(
@@ -243,19 +247,19 @@ class SessionTracker:
         manager.on_session_new(session_new_handler)
         manager.on_session_removed(session_removed_handler)
 
-        print("SessionTracker läuft. Warten auf Logins/Logouts...")
+        print("SessionTracker running. Waiting for logins/logouts...")
         while True:
             await asyncio.sleep(3600)
 
     def _get_username(self, uid):
         """
-        Holt den Nutzernamen zu einer UID.
+        Get the username for a given UID.
 
         Args:
-            uid (int): User-ID
+            uid (int): User ID
 
         Returns:
-            str: Nutzername
+            str: Username
         """
         import pwd
 
@@ -266,12 +270,13 @@ class SessionTracker:
 
 
 if __name__ == "__main__":
-    # Lade Default-Konfiguration
+
+    # Load default configuration
     base_dir = os.path.dirname(os.path.abspath(__file__))
     default_config_path = os.path.join(base_dir, "../default-config.yaml")
     with open(default_config_path, "r") as f:
         config = yaml.safe_load(f)
-    # Überschreibe mit Werten aus config.yaml, falls vorhanden
+    # Override with values from config.yaml if present
     config_path = os.path.join(base_dir, "../config.yaml")
     if os.path.exists(config_path):
         with open(config_path, "r") as f:

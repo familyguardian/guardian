@@ -1,6 +1,6 @@
 """
-PAM-Manager für guardian-daemon
-Verwaltet Login-Zeitfenster für Kinder über /etc/security/time.conf
+PAM manager for guardian-daemon
+Manages login time windows for children via /etc/security/time.conf
 """
 
 import os
@@ -12,13 +12,20 @@ TIME_CONF_PATH = Path("/etc/security/time.conf")
 
 
 class PamManager:
+    """
+    Manages PAM time.conf rules for login time windows according to policy.
+    """
+
     def __init__(self, policy: Policy):
+        """
+        Initialize the PamManager with a policy instance.
+        """
         self.policy = policy
 
     def write_time_rules(self):
         """
-        Aktualisiert die Zeitregeln für alle Kinder gemäß Policy in /etc/security/time.conf,
-        ohne fremde Regeln zu überschreiben.
+        Updates the time rules for all children according to the policy in /etc/security/time.conf,
+        without overwriting foreign rules.
         """
         rules = self._generate_rules()
         managed_usernames = set(self.policy.data.get("users", {}).keys())
@@ -49,7 +56,7 @@ class PamManager:
 
     def _generate_rules(self):
         """
-        Erzeugt die PAM-Zeitregeln aus der Policy
+        Generates the PAM time rules from the policy
         """
         rules = []
         users = self.policy.data.get("users", {})
@@ -58,13 +65,13 @@ class PamManager:
             # Beispiel: weekdays: "08:00-20:00"
             if curfew:
                 for day, times in curfew.items():
-                    # PAM time.conf Syntax: <service>;<ttys>;<users>;<day>;<start>-<end>
+                    # PAM time.conf syntax: <service>;<ttys>;<users>;<day>;<start>-<end>
                     rules.append(f"login;*;{username};{day};{times}")
         return rules
 
     def remove_time_rules(self):
         """
-        Entfernt die von guardian-daemon gesetzten Zeitregeln
+        Remove time rules set by guardian-daemon from /etc/security/time.conf.
         """
         if TIME_CONF_PATH.exists():
             with open(TIME_CONF_PATH, "r") as f:
