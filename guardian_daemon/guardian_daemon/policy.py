@@ -32,7 +32,6 @@ class Policy:
 
         env_path = os.environ.get("GUARDIAN_DAEMON_CONFIG")
         self.config_path = Path(config_path or env_path or "config.yaml")
-        import yaml
 
         with open(self.config_path, "r") as f:
             self.data = yaml.safe_load(f)
@@ -83,7 +82,6 @@ class Policy:
         """
         Lädt die Policy-Konfiguration neu und synchronisiert sie mit der Datenbank.
         """
-        import yaml
 
         with open(self.config_path, "r") as f:
             self.data = yaml.safe_load(f)

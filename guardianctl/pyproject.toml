@@ -11,4 +11,9 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = []
+dev = [
+    "black>=25.1.0",
+    "isort>=6.0.1",
+    "lefthook>=1.13.1",
+    "mypy>=1.18.1",
+]

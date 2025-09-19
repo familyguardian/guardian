@@ -13,10 +13,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "black>=25.1.0",
-    "isort>=6.0.1",
-    "lefthook>=1.13.1",
-    "mypy>=1.18.1",
     "pip>=25.2",
     "types-pyyaml>=6.0.12.20250915",
 ]

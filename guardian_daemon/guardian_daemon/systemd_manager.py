@@ -3,7 +3,6 @@ Systemd-Manager für guardian-daemon
 Erzeugt und verwaltet systemd-Timer/Units für Tagesreset und Curfew.
 """
 
-import os
 from pathlib import Path
 
 SYSTEMD_PATH = Path("/etc/systemd/system")
@@ -18,7 +17,7 @@ class SystemdManager:
         Erzeugt einen systemd-Timer und eine zugehörige Service-Unit für den Tagesreset.
         """
         timer_name = "guardian-daily-reset"
-        service_unit = f"""
+        service_unit = """
 [Unit]
 Description=Guardian daily quota reset
 

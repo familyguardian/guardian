@@ -5,7 +5,6 @@ Stellt Funktionen für Session-Handling und spätere Erweiterungen bereit.
 
 import json
 import sqlite3
-from pathlib import Path
 from typing import Optional
 
 

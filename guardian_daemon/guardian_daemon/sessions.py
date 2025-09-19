@@ -5,13 +5,11 @@ Speichert Daten in SQLite.
 """
 
 import asyncio
-import threading
+import os
 import time
-from typing import Optional
 
-from dbus_next import Variant
+import yaml
 from dbus_next.aio import MessageBus
-from dbus_next.constants import MessageType
 
 from guardian_daemon.policy import Policy
 from guardian_daemon.storage import Storage
@@ -38,7 +36,7 @@ class SessionTracker:
             {}
         )  # session_id -> {uid, username, start_time}
 
-    def handle_login(self, session_id, uid, username):
+    def handle_login(self, session_id, uid, username, props):
         """
         Registriert eine neue Session beim Login, aber nur für Kinder-Accounts.
 
@@ -234,7 +232,7 @@ class SessionTracker:
                     return
                 print(f"[DEBUG] Alle Session-Properties für {session_id}: {props}")
                 print(f"[DEBUG] Extrahiert: Name={username}, UID={uid}")
-                self.handle_login(session_id, uid, username)
+                self.handle_login(session_id, uid, username, props)
 
             asyncio.create_task(inner())
 
@@ -268,11 +266,6 @@ class SessionTracker:
 
 
 if __name__ == "__main__":
-    import os
-    import sys
-
-    import yaml
-
     # Lade Default-Konfiguration
     base_dir = os.path.dirname(os.path.abspath(__file__))
     default_config_path = os.path.join(base_dir, "../default-config.yaml")

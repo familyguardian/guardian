@@ -1,0 +1,66 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: ruff daemon
+      glob: "guardian_daemon/**/*.py"
+      run: uv run --package guardian_daemon ruff check --fix {staged_files}
+      stage_fixed: true
+    - name: black daemon
+      glob: "guardian_daemon/**/*.py"
+      run: uv run --package guardian_daemon black {staged_files}
+      stage_fixed: true
+    - name: mypy daemon
+      glob: "guardian_daemon/**/*.py"
+      run: pushd guardian_daemon ; uv run --active mypy --install-types --explicit-package-bases . ; popd
+    - name: isort daemon
+      glob: "guardian_daemon/**/*.py"
+      run: uv run --package guardian_daemon isort {staged_files}
+      stage_fixed: true
+    - name: ruff ctl
+      glob: "guardianctl/**/*.py"
+      run: uv run --package guardianctl ruff check --fix {staged_files}
+      stage_fixed: true
+    - name: black ctl
+      glob: "guardianctl/**/*.py"
+      run: uv run --package guardianctl black {staged_files}
+      stage_fixed: true
+    - name: mypy ctl
+      glob: "guardianctl/**/*.py"
+      run: pushd guardianctl ; uv run --active mypy --install-types --explicit-package-bases . ; popd
+    - name: isort ctl
+      glob: "guardianctl/**/*.py"
+      run: uv run --package guardianctl isort {staged_files}
+      stage_fixed: true
+    - name: ruff agent
+      glob: "guardian_agent/**/*.py"
+      run: uv run --package guardian_agent ruff check --fix {staged_files}
+      stage_fixed: true
+    - name: black agent
+      glob: "guardian_agent/**/*.py"
+      run: uv run --package guardian_agent black {staged_files}
+      stage_fixed: true
+    - name: mypy agent
+      glob: "guardian_agent/**/*.py"
+      run: pushd guardian_agent ; uv run --active mypy --install-types --explicit-package-bases . ; popd
+    - name: isort agent
+      glob: "guardian_agent/**/*.py"
+      run: uv run --package guardian_agent isort {staged_files}
+      stage_fixed: true
+    - name: ruff hub
+      glob: "guardian_hub/**/*.py"
+      run: uv run --package guardian_hub ruff check --fix {staged_files}
+      stage_fixed: true
+    - name: black hub
+      glob: "guardian_hub/**/*.py"
+      run: uv run --package guardian_hub black {staged_files}
+      stage_fixed: true
+    - name: mypy hub
+      glob: "guardian_hub/**/*.py"
+      run: pushd guardian_hub ; uv run --active mypy --install-types --explicit-package-bases . ; popd
+    - name: isort hub
+      glob: "guardian_hub/**/*.py"
+      run: uv run --package guardian_hub isort {staged_files}
+      stage_fixed: true
+    - name: markdownlint
+      glob: "*.md"
+      run: markdownlint {staged_files}

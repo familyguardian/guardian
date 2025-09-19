@@ -3,8 +3,6 @@ Enforcement-Modul für guardian-daemon
 Prüft Quota und Curfew, erzwingt Limits durch Session-Beendigung und Login-Sperre.
 """
 
-import time
-
 from guardian_daemon.policy import Policy
 from guardian_daemon.sessions import SessionTracker
 
