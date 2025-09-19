@@ -1,5 +1,5 @@
 """
-Systemd manager for guardian-daemon
+Systemd manager for guardian-daemon.
 Creates and manages systemd timers/units for daily reset and curfew.
 """
 

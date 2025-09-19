@@ -1,3 +1,7 @@
+"""
+IPC server for admin commands of the Guardian Daemon.
+"""
+
 import json
 import os
 import socket

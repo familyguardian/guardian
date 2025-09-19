@@ -1,5 +1,5 @@
 """
-Session tracking for guardian-daemon
+Session tracking for guardian-daemon.
 Monitors logins/logouts via systemd-logind (DBus), measures usage time and checks quota/curfew.
 Stores data in SQLite.
 """
@@ -100,7 +100,7 @@ class SessionTracker:
                 f"Logout: {session['username']} Session {session_id} Duration: {duration:.1f}s"
             )
 
-    def check_quota(self, username):
+    def check_quota(self, username: str) -> bool:
         """
         Sum all sessions since the last reset and check against the daily quota.
         Returns True if time remains, otherwise False.

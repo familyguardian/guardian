@@ -1,5 +1,5 @@
 """
-Enforcement module for guardian-daemon
+Enforcement module for guardian-daemon.
 Checks quota and curfew, enforces limits by terminating sessions and blocking logins.
 """
 

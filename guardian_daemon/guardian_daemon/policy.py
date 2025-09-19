@@ -1,5 +1,5 @@
 """
-Policy loader for guardian-daemon
+Policy loader for guardian-daemon.
 Loads and validates settings from a YAML configuration file.
 """
 

@@ -20,7 +20,7 @@ follow_untyped_imports = true
 
 [tool.uv.workspace]
 members = ["*/"]
-exclude = ["scripts", "docs", "tests"]
+exclude = ["scripts", "docs", "tests", "_site"]
 
 [dependency-groups]
 dev = [
@@ -30,4 +30,13 @@ dev = [
     "mypy>=1.18.2",
     "pytest>=8.4.2",
     "ruff>=0.13.1",
+]
+
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-autorefs>=1.4.3",
+    "mkdocs-code-validator>=0.2.0",
+    "mkdocs-material>=9.6.20",
+    "mkdocs-section-index>=0.3.10",
+    "mkdocstrings[python]>=0.30.1"
 ]

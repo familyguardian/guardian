@@ -1,0 +1,94 @@
+site_name: "Guardian Documentation"
+
+nav:
+- Home:
+  - Overview: index.md
+  - Quickstart: home/quickstart.md
+- Guardian Daemon: reference/daemon.md
+- Guardian Agent: reference/agent.md
+- Guardian Hub: reference/hub.md
+- Guardian CLI: reference/ctl.md
+- Developer Guide:
+  - Development Setup: developer/index.md
+  - Implementation Notes: developer/daemon_implementation_notes.md
+
+theme:
+  name: "material"
+  features:
+  - announce.dismiss
+  - content.action.edit
+  - content.action.view
+  - content.code.annotate
+  - content.code.copy
+  - content.tooltips
+  - navigation.footer
+  - navigation.instant.preview
+  - navigation.path
+  - navigation.sections
+  - navigation.tabs
+  - navigation.tabs.sticky
+  - navigation.top
+  - search.highlight
+  - search.suggest
+  - toc.follow
+  palette:
+  - media: "(prefers-color-scheme)"
+    toggle:
+      icon: material/brightness-auto
+      name: Switch to light mode
+  - media: "(prefers-color-scheme: light)"
+    scheme: default
+    primary: teal
+    accent: purple
+    toggle:
+      icon: material/weather-sunny
+      name: Switch to dark mode
+  - media: "(prefers-color-scheme: dark)"
+    scheme: slate
+    primary: black
+    accent: lime
+    toggle:
+      icon: material/weather-night
+      name: Switch to system preference
+
+markdown_extensions:
+- pymdownx.highlight:
+    anchor_linenums: true
+    line_spans: __span
+    pygments_lang_class: true
+- pymdownx.inlinehilite
+- pymdownx.snippets
+- pymdownx.superfences
+
+plugins:
+- search
+- autorefs
+- section-index
+- mkdocstrings:
+    handlers:
+      python:
+        paths: ["guardian_daemon", "guardianctl", "guardian_agent", "guardian_hub"]
+        options:
+          backlinks: tree
+          docstring_options:
+            ignore_init_summary: true
+          docstring_section_style: list
+          filters: ["!^_"]
+          heading_level: 1
+          inherited_members: true
+          merge_init_into_class: true
+          parameter_headings: true
+          separate_signature: true
+          show_root_heading: true
+          show_root_full_path: false
+          show_signature_annotations: true
+          show_source: false
+          show_symbol_type_heading: true
+          show_symbol_type_toc: true
+          signature_crossrefs: true
+          summary: true
+- code-validator:
+    identifiers:
+      python:
+        validators:
+        - uv run python $<

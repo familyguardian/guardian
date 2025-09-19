@@ -1,5 +1,5 @@
 """
-PAM manager for guardian-daemon
+PAM manager for guardian-daemon.
 Manages login time windows for children via /etc/security/time.conf
 """
 

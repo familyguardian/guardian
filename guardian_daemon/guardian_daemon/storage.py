@@ -1,6 +1,6 @@
 """
-Zentrale SQLite-Schnittstelle für guardian-daemon
-Stellt Funktionen für Session-Handling und spätere Erweiterungen bereit.
+Central SQLite interface for guardian-daemon.
+Provides functions for session handling and future extensions.
 """
 
 import json
@@ -13,7 +13,7 @@ class Storage:
     Central SQLite interface for session and settings storage in Guardian Daemon.
     """
 
-    def get_user_settings(self, username: str):
+    def get_user_settings(self, username: str) -> Optional[dict]:
         """
         Retrieve user settings from the database for the given username.
 
@@ -165,7 +165,9 @@ class Storage:
         )
         self.conn.commit()
 
-    def get_sessions_for_user(self, username: str, since: Optional[float] = None):
+    def get_sessions_for_user(
+        self, username: str, since: Optional[float] = None
+    ) -> list:
         """
         Retrieve all sessions for a user, optionally since a specific time.
 
@@ -186,7 +188,7 @@ class Storage:
             c.execute("SELECT * FROM sessions WHERE username=?", (username,))
         return c.fetchall()
 
-    def get_all_usernames(self):
+    def get_all_usernames(self) -> list:
         """
         Return all usernames (except 'default') from the database.
 
