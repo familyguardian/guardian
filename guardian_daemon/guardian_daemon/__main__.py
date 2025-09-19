@@ -1,18 +1,17 @@
 import asyncio
-import logging
+import hashlib
 import os
 
 import yaml
 
+from guardian_daemon.logging import get_logger
 from guardian_daemon.pam_manager import PamManager
 from guardian_daemon.policy import Policy
 from guardian_daemon.sessions import SessionTracker
 from guardian_daemon.storage import Storage
 from guardian_daemon.systemd_manager import SystemdManager
 
-logging.basicConfig(
-    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
-)
+logger = get_logger("GuardianDaemon")
 
 
 class GuardianDaemon:
@@ -48,19 +47,16 @@ class GuardianDaemon:
 
     def _get_config_snapshot(self):
         """
-        Erzeuge einen Hash/Snapshot der aktuellen Policy-Konfiguration.
+        Generates a snapshot of the current configuration.
+
         Returns:
-            str: SHA256-Hash der Policy-Daten
+            str: SHA256 hash of the policy data
         """
-        import hashlib
-
-        import yaml
-
         return hashlib.sha256(yaml.dump(self.policy.data).encode()).hexdigest()
 
     async def periodic_reload(self):
         """
-        Prüft alle 5 Minuten auf Config-Änderungen und aktualisiert Timer/PAM.
+        Checks every 5 minutes for config changes and updates timers/PAM rules.
         """
         while True:
             await asyncio.sleep(300)
@@ -68,27 +64,39 @@ class GuardianDaemon:
             self.policy.reload()
             new_snapshot = self._get_config_snapshot()
             if new_snapshot != old_snapshot:
-                logging.info("Config geändert, aktualisiere Timer und PAM-Regeln.")
+                logger.info("Config changed, updating timers and PAM rules.")
                 self.pam = PamManager(self.policy)
                 self.pam.write_time_rules()
                 reset_time = self.policy.data.get("reset_time", "03:00")
                 self.systemd.create_daily_reset_timer(reset_time)
+                # Curfew timer update (example: use start/end from policy)
+                curfew = self.policy.data.get("curfew", {})
+                start_time = curfew.get("start", "22:00")
+                end_time = curfew.get("end", "06:00")
+                self.systemd.create_curfew_timer(start_time, end_time)
+                self.systemd.reload_systemd()
                 self.last_config = new_snapshot
 
     def check_and_recover_reset(self):
         """
-        Prüft beim Start, ob der letzte Reset ausgeführt wurde, und holt ihn ggf. nach.
+        Checks at startup whether the last reset was executed and recovers it if necessary.
         """
-        # TODO: Implementiere Logik, z.B. mit Timestamp in Storage oder Lockfile
-        logging.info("Prüfe, ob Tagesreset nachgeholt werden muss (Stub).")
+        # TODO: Implement logic, e.g. with timestamp in storage or lockfile
+        logger.info("Check if last reset needs to be recovered (Stub).")
 
     async def run(self):
         """
-        Startet alle Komponenten und Tasks des Daemons.
+        Starts all components and tasks of the daemon.
         """
         self.pam.write_time_rules()
         reset_time = self.policy.data.get("reset_time", "03:00")
         self.systemd.create_daily_reset_timer(reset_time)
+        # Curfew timer setup (example: use start/end from policy)
+        curfew = self.policy.data.get("curfew", {})
+        start_time = curfew.get("start", "22:00")
+        end_time = curfew.get("end", "06:00")
+        self.systemd.create_curfew_timer(start_time, end_time)
+        self.systemd.reload_systemd()
         self.check_and_recover_reset()
         await asyncio.gather(self.tracker.run(), self.periodic_reload())
 

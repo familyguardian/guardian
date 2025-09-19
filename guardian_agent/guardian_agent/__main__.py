@@ -1,10 +1,14 @@
 import asyncio
+import fcntl
 import getpass
 import os
 import subprocess
 
+import psutil
 from dbus_next.aio import MessageBus
 from dbus_next.service import ServiceInterface, method
+
+from guardian_agent.lock_events import LockEventReporter
 
 
 class GuardianAgentInterface(ServiceInterface):
@@ -20,14 +24,14 @@ class GuardianAgentInterface(ServiceInterface):
         self.username = username
 
     @method()
-    async def GetUsername(self) -> str:
+    async def GetUsername(self):
         """
         Return the username registered with this agent instance.
         """
         return self.username
 
     @method()
-    async def NotifyUser(self, message: str, category: str = "info"):
+    async def NotifyUser(self, message, category="info"):
         """
         Show a desktop notification to the user with the given message and category.
         """
@@ -67,12 +71,10 @@ async def main():
     """
     bus = await MessageBus().connect()
     username = getpass.getuser()
-    import fcntl
 
     obj_path = os.environ.get("GUARDIAN_AGENT_PATH")
     if not obj_path:
         # Automatic session numbering with cleanup of orphaned entries
-        import psutil
 
         lock_path = os.path.join(os.path.dirname(__file__), "agent_path_lock.txt")
         session_num = None
@@ -112,6 +114,11 @@ async def main():
     print(
         f"Guardian Agent listening for notifications for user: {username} on {obj_path}"
     )
+
+    # Start lock event reporter
+    lock_reporter = LockEventReporter(obj_path, username)
+    asyncio.create_task(lock_reporter.run())
+
     try:
         await asyncio.Future()  # run forever
     finally:

@@ -7,6 +7,10 @@ import json
 import sqlite3
 from typing import Optional
 
+from guardian_daemon.logging import get_logger
+
+logger = get_logger("Storage")
+
 
 class Storage:
     """
@@ -24,10 +28,13 @@ class Storage:
             dict | None: Einstellungen des Nutzers oder None
         """
         c = self.conn.cursor()
+        logger.debug(f"Fetching settings for user: {username}")
         c.execute("SELECT settings FROM user_settings WHERE username=?", (username,))
         row = c.fetchone()
         if row:
+            logger.debug(f"Settings found for user: {username}")
             return json.loads(row[0])
+        logger.debug(f"No settings found for user: {username}")
         return None
 
     def set_user_settings(self, username: str, settings: dict):
@@ -39,6 +46,7 @@ class Storage:
             settings (dict): Einstellungen
         """
         c = self.conn.cursor()
+        logger.info(f"Storing settings for user: {username}")
         c.execute(
             "INSERT OR REPLACE INTO user_settings (username, settings) VALUES (?, ?)",
             (username, json.dumps(settings)),
@@ -50,6 +58,7 @@ class Storage:
         Update session entry with logout time and duration.
         """
         c = self.conn.cursor()
+        logger.info(f"Updating session logout for session_id: {session_id}")
         c.execute(
             """
             UPDATE sessions SET end_time = ?, duration = ? WHERE session_id = ? AND (end_time = 0 OR end_time IS NULL)
@@ -66,6 +75,7 @@ class Storage:
             db_path (str): Pfad zur SQLite-Datenbank.
         """
         self.db_path = db_path
+        logger.info(f"Opening SQLite database at {self.db_path}")
         self.conn = sqlite3.connect(self.db_path)
         self._init_db()
 
@@ -75,8 +85,10 @@ class Storage:
         """
         try:
             with self.conn:
+                logger.debug("Setting PRAGMA journal_mode=WAL and foreign_keys=ON")
                 self.conn.execute("PRAGMA journal_mode=WAL;")
                 self.conn.execute("PRAGMA foreign_keys=ON;")
+                logger.debug("Ensuring sessions and user_settings tables exist")
                 self.conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS sessions (
@@ -101,7 +113,7 @@ class Storage:
                 """
                 )
         except Exception as e:
-            print(f"[DB-ERROR] Fehler beim Initialisieren der Datenbank: {e}")
+            logger.error(f"DB error during database initialization: {e}")
 
     def sync_config_to_db(self, config: dict):
         """
@@ -111,15 +123,16 @@ class Storage:
             config (dict): Konfigurationsdaten
         """
         # Defaults abgleichen
+        logger.info("Synchronizing config to database")
         if self.get_user_settings("default") is None:
             defaults = config.get("defaults", {})
+            logger.debug("Saving default settings to database")
             self.set_user_settings("default", defaults)
-        # Users abgleichen
         for username, settings in config.get("users", {}).items():
             if self.get_user_settings(username) is None:
-                # If settings are empty, save default
                 if not settings:
                     settings = config.get("defaults", {})
+                logger.debug(f"Saving settings for new user: {username}")
                 self.set_user_settings(username, settings)
 
     def add_session(
@@ -147,6 +160,9 @@ class Storage:
             service (str, optional): Service (e.g. sddm)
         """
         c = self.conn.cursor()
+        logger.info(
+            f"Adding new session for user: {username}, session_id: {session_id}"
+        )
         c.execute(
             """
             INSERT INTO sessions (session_id, username, uid, start_time, end_time, duration, desktop, service)
@@ -179,6 +195,7 @@ class Storage:
             list: List of sessions
         """
         c = self.conn.cursor()
+        logger.debug(f"Fetching sessions for user: {username}, since: {since}")
         if since:
             c.execute(
                 "SELECT * FROM sessions WHERE username=? AND start_time>=?",
@@ -186,7 +203,9 @@ class Storage:
             )
         else:
             c.execute("SELECT * FROM sessions WHERE username=?", (username,))
-        return c.fetchall()
+        sessions = c.fetchall()
+        logger.debug(f"Found {len(sessions)} sessions for user: {username}")
+        return sessions
 
     def get_all_usernames(self) -> list:
         """
@@ -196,8 +215,11 @@ class Storage:
             list: List of usernames
         """
         c = self.conn.cursor()
+        logger.debug("Fetching all usernames except 'default'")
         c.execute("SELECT username FROM user_settings WHERE username != 'default'")
-        return [row[0] for row in c.fetchall()]
+        usernames = [row[0] for row in c.fetchall()]
+        logger.debug(f"Found usernames: {usernames}")
+        return usernames
 
     def delete_sessions_since(self, since: float):
         """
@@ -207,6 +229,7 @@ class Storage:
             since (float): Startzeitpunkt (Unix-Timestamp)
         """
         c = self.conn.cursor()
+        logger.info(f"Deleting sessions since timestamp: {since}")
         c.execute("DELETE FROM sessions WHERE start_time >= ?", (since,))
         self.conn.commit()
 
@@ -214,6 +237,7 @@ class Storage:
         """
         Close the database connection.
         """
+        logger.info("Closing SQLite database connection")
         self.conn.close()
 
 

@@ -3,8 +3,11 @@ Enforcement module for guardian-daemon.
 Checks quota and curfew, enforces limits by terminating sessions and blocking logins.
 """
 
+from guardian_daemon.logging import get_logger
 from guardian_daemon.policy import Policy
 from guardian_daemon.sessions import SessionTracker
+
+logger = get_logger("Enforcer")
 
 
 class Enforcer:
@@ -40,7 +43,7 @@ class Enforcer:
         Terminates all running sessions of the user (e.g. via systemd or loginctl).
         """
         # TODO: Integration with systemd/loginctl
-        print(f"[ENFORCE] Terminating all sessions for {username}")
+        logger.warning(f"Terminating all sessions for {username}")
 
     def notify_user(self, username, message, category="info"):
         """
@@ -72,20 +75,20 @@ class Enforcer:
                         agent_username = await iface.call_get_username()
                         if agent_username == username:
                             await iface.call_notify_user(message, category)
-                            print(
-                                f"[NOTIFY] Message sent to Agent {obj_path} for user {username}."
+                            logger.info(
+                                f"Message sent to Agent {obj_path} for user {username}."
                             )
                             notified = True
                     except DBusError:
                         continue
                     except Exception as e:
-                        print(f"[NOTIFY ERROR] Agent {obj_path}: {e}")
+                        logger.error(f"Notify error for Agent {obj_path}: {e}")
                 if not notified:
-                    print(f"[NOTIFY] No Agent for user {username} reachable.")
+                    logger.warning(f"No Agent for user {username} reachable.")
 
             asyncio.run(send())
         except Exception as e:
-            print(f"[NOTIFY ERROR] {username}: {message} ({e})")
+            logger.error(f"Notify error for {username}: {message} ({e})")
 
 
 # Quota/Curfew enforcement

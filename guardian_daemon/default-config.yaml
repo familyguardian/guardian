@@ -9,6 +9,11 @@ ipc_socket: "/run/guardian-daemon.sock"  # Pfad zum IPC-Socket
 reset_time: "03:00"
 timezone: "Europe/Berlin"
 
+logging:
+  level: INFO    # Log-Level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: plain  # Options: plain, json
+  target: stdout # Options: stdout, syslog
+
 notifications:
   pre_quota_minutes: [15, 10, 5]  # Minuten vor Quota-Ende für Vorwarnungen
   grace_period:

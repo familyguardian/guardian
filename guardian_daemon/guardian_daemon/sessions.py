@@ -5,14 +5,20 @@ Stores data in SQLite.
 """
 
 import asyncio
+import datetime
 import os
+import pwd
 import time
 
 import yaml
 from dbus_next.aio import MessageBus
+from dbus_next.constants import BusType
 
+from guardian_daemon.logging import get_logger
 from guardian_daemon.policy import Policy
 from guardian_daemon.storage import Storage
+
+logger = get_logger("SessionTracker")
 
 
 class SessionTracker:
@@ -20,6 +26,33 @@ class SessionTracker:
     Monitors and stores user sessions, checks quota and curfew.
     Connects to systemd-logind via DBus.
     """
+
+    def receive_lock_event(
+        self, session_id: str, username: str, locked: bool, timestamp: float
+    ):
+        """
+        Called via D-Bus/IPC from agent to record lock/unlock events for a session.
+        """
+        if session_id not in self.active_sessions:
+            logger.warning(f"Lock event for unknown session: {session_id}")
+            return
+        if session_id not in self.session_locks:
+            self.session_locks[session_id] = []
+        if locked:
+            # Lock started
+            self.session_locks[session_id].append((timestamp, None))
+            logger.debug(f"Session {session_id}: screen locked at {timestamp}")
+        else:
+            # Lock ended
+            # Find last open lock period
+            for i in range(len(self.session_locks[session_id]) - 1, -1, -1):
+                lock_start, lock_end = self.session_locks[session_id][i]
+                if lock_end is None:
+                    self.session_locks[session_id][i] = (lock_start, timestamp)
+                    logger.debug(
+                        f"Session {session_id}: screen unlocked at {timestamp}"
+                    )
+                    break
 
     def __init__(self, policy: Policy, config: dict):
         """
@@ -32,9 +65,9 @@ class SessionTracker:
         self.policy = policy
         db_path = config.get("db_path", "guardian.sqlite")
         self.storage = Storage(db_path)
-        self.active_sessions: dict[str, dict[str, float | int | str]] = (
-            {}
-        )  # session_id -> {uid, username, start_time}
+        self.active_sessions: dict[str, dict] = {}
+        # Placeholder for lock event tracking (now handled by agent)
+        self.session_locks: dict[str, list[tuple[float, float | None]]] = {}
 
     def handle_login(self, session_id, uid, username, props):
         """
@@ -47,19 +80,22 @@ class SessionTracker:
         """
         kids = set(self.policy.data.get("users", {}).keys())
         if username not in kids:
-            print(f"Ignoring session from {username} (UID {uid}) Session {session_id}")
+            logger.info(
+                f"Ignoring session from {username} (UID {uid}) Session {session_id}"
+            )
             return
         self.active_sessions[session_id] = {
             "uid": uid,
             "username": username,
             "start_time": time.monotonic(),
         }
+        self.session_locks[session_id] = []
         # Debug output of all info before writing
         desktop = props.get("Desktop", None)
         service = props.get("Service", None)
-        print(
-            f"[DEBUG] Writing session to DB: session_id={session_id}, username={username}, uid={uid}, start_time={self.active_sessions[session_id]['start_time']}, end_time=0.0, duration=0.0, desktop={desktop}, service={service}"
-        )
+        # print(
+        #     f"[DEBUG] Writing session to DB: session_id={session_id}, username={username}, uid={uid}, start_time={self.active_sessions[session_id]['start_time']}, end_time=0.0, duration=0.0, desktop={desktop}, service={service}"
+        # )
         # Create session entry with end_time and duration=0
         self.storage.add_session(
             session_id,
@@ -71,7 +107,7 @@ class SessionTracker:
             desktop,
             service,
         )
-        print(f"Login: {username} (UID {uid}) Session {session_id}")
+        logger.info(f"Login: {username} (UID {uid}) Session {session_id}")
 
     def handle_logout(self, session_id):
         """
@@ -81,23 +117,31 @@ class SessionTracker:
             session_id (str): Session ID
         """
         session = self.active_sessions.pop(session_id, None)
+        lock_periods = self.session_locks.pop(session_id, [])
         if session:
             kids = set(self.policy.data.get("users", {}).keys())
             if session["username"] not in kids:
-                print(
+                logger.info(
                     f"Ignoring logout from {session['username']} Session {session_id}"
                 )
                 return
             end_time = time.monotonic()
             duration = end_time - session["start_time"]
-            # Debug output of all info before update
-            print(
-                f"[DEBUG] Update session in DB: session_id={session_id}, username={session['username']}, uid={session['uid']}, start_time={session['start_time']}, end_time={end_time}, duration={duration}"
+            # Deduct locked time
+            locked_time = 0.0
+            for lock_start, lock_end in lock_periods:
+                if lock_end is not None:
+                    locked_time += max(0.0, lock_end - lock_start)
+                else:
+                    locked_time += max(0.0, end_time - lock_start)
+            effective_duration = duration - locked_time
+            logger.debug(
+                f"Session {session_id}: raw duration={duration:.1f}s, locked={locked_time:.1f}s, effective={effective_duration:.1f}s"
             )
             # Update session entry
-            self.storage.update_session_logout(session_id, end_time, duration)
-            print(
-                f"Logout: {session['username']} Session {session_id} Duration: {duration:.1f}s"
+            self.storage.update_session_logout(session_id, end_time, effective_duration)
+            logger.info(
+                f"Logout: {session['username']} Session {session_id} Duration: {effective_duration:.1f}s (locked: {locked_time:.1f}s)"
             )
 
     def check_quota(self, username: str) -> bool:
@@ -117,8 +161,6 @@ class SessionTracker:
         quota = user_policy.get("daily_quota_minutes")
         if quota is None:
             quota = self.policy.get_default("daily_quota_minutes")
-
-        import datetime
 
         reset_time = self.policy.data.get("reset_time", "03:00")
         now = datetime.datetime.now(datetime.timezone.utc).astimezone()
@@ -148,9 +190,8 @@ class SessionTracker:
 
     async def run(self):
         """
-        Start session tracking and connect to systemd-logind via DBus.
+        Start session tracking, connect to systemd-logind via DBus, and listen for KDE lock events.
         """
-        from dbus_next.constants import BusType
 
         bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
         introspection = await bus.introspect(
@@ -234,8 +275,10 @@ class SessionTracker:
                         f"Ignoriere Session von {username} (UID {uid}) Session {session_id}"
                     )
                     return
-                print(f"[DEBUG] Alle Session-Properties für {session_id}: {props}")
-                print(f"[DEBUG] Extrahiert: Name={username}, UID={uid}")
+                # print(f"[DEBUG] Alle Session-Properties für {session_id}: {props}")
+                logger.debug(
+                    f"Extracted: Name={username}, UID={uid}, Desktop={props.get('Desktop')}, Service={props.get('Service')}"
+                )
                 self.handle_login(session_id, uid, username, props)
 
             asyncio.create_task(inner())
@@ -247,7 +290,7 @@ class SessionTracker:
         manager.on_session_new(session_new_handler)
         manager.on_session_removed(session_removed_handler)
 
-        print("SessionTracker running. Waiting for logins/logouts...")
+        logger.info("SessionTracker running. Waiting for logins/logouts...")
         while True:
             await asyncio.sleep(3600)
 
@@ -261,7 +304,6 @@ class SessionTracker:
         Returns:
             str: Username
         """
-        import pwd
 
         try:
             return pwd.getpwuid(uid).pw_name
