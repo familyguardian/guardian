@@ -28,6 +28,46 @@ class SessionTracker:
     Connects to systemd-logind via DBus.
     """
 
+    async def refresh_agent_name_mapping(self):
+        """
+        Refresh the mapping of usernames to their current D-Bus agent names using discover_agent_names_for_user().
+        Stores the mapping in self.agent_name_map: {username: [dbus_name, ...]}
+        """
+        self.agent_name_map = {}
+        kids = set(self.policy.data.get("users", {}).keys())
+        for username in kids:
+            try:
+                names = await self.discover_agent_names_for_user(username)
+                self.agent_name_map[username] = names
+                logger.debug(f"Refreshed agent D-Bus names for {username}: {names}")
+            except Exception as e:
+                logger.error(f"Error refreshing agent names for {username}: {e}")
+
+    def get_agent_names_for_user(self, username: str) -> list:
+        """
+        Return the cached list of D-Bus agent names for a user, or empty list if not found.
+        """
+        if hasattr(self, "agent_name_map"):
+            return self.agent_name_map.get(username, [])
+        return []
+
+    async def discover_agent_names_for_user(self, username: str) -> list:
+        """
+        Discover current org.guardian.Agent D-Bus names for the given user by listing names on the system bus.
+        Returns a list of matching D-Bus names.
+        """
+        from dbus_next.aio import MessageBus
+        from dbus_next.constants import BusType
+
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        names = await bus.list_names()
+        # Filter for agent prefix and username
+        return [
+            name
+            for name in names
+            if name.startswith("org.guardian.Agent") and username in name
+        ]
+
     def get_agent_paths_for_user(self, username: str):
         """
         Returns a list of D-Bus object paths for agents belonging to the given user.

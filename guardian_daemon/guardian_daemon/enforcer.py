@@ -134,6 +134,7 @@ class Enforcer:
     def notify_user(self, username, message, category="info"):
         """
         Sends a desktop notification to all matching agents of the given user (via D-Bus).
+        Uses cached agent_name_map from SessionTracker first, falls back to discover_agent_names_for_user if needed.
         """
         import asyncio
 
@@ -144,84 +145,90 @@ class Enforcer:
         async def send():
             bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
             notified = False
-            # Get agent paths for this user from session tracker
-            agent_paths = self.tracker.get_agent_paths_for_user(username)
-            if not agent_paths:
-                logger.warning(f"No agent paths found for user {username}.")
-            for obj_path in agent_paths:
-                try:
-                    proxy = await bus.introspect("org.guardian.Agent", obj_path)
-                    obj = bus.get_proxy_object("org.guardian.Agent", obj_path, proxy)
-                    iface = obj.get_interface("org.guardian.Agent")
-                    agent_username = await iface.call_get_username()
-                    # Filter out systemd-user sessions
-                    # Try to get service type from SessionTracker
-                    session_info = None
-                    for s in self.tracker.active_sessions.values():
-                        if (
-                            s.get("agent_path") == obj_path
-                            and s["username"] == username
-                        ):
-                            session_info = s
-                            break
-                    service = session_info["service"] if session_info else None
-                    desktop = session_info["desktop"] if session_info else None
-                    if service == "systemd-user" or not desktop:
-                        logger.debug(
-                            f"Skipping notification for agent {obj_path}: service={service}, desktop={desktop}"
-                        )
-                        continue
-                    if agent_username == username:
-                        await iface.call_notify_user(message, category)
-                        logger.info(
-                            f"Message sent to Agent {obj_path} for user {username}."
-                        )
-                        notified = True
-                except DBusError:
-                    continue
-                except Exception as e:
-                    logger.error(f"Notify error for Agent {obj_path}: {e}")
-            if not notified:
-                logger.warning(f"No Agent for user {username} reachable.")
-            bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-            notified = False
-            for session_num in range(1, 10):
-                obj_path = (
-                    f"/org/guardian/Agent{session_num}"
-                    if session_num > 1
-                    else "/org/guardian/Agent"
+            # Try cached agent names first
+            agent_names = self.tracker.get_agent_names_for_user(username)
+            if not agent_names:
+                logger.debug(
+                    f"No cached agent D-Bus names for user {username}, will try discovery if needed."
                 )
-                try:
-                    proxy = await bus.introspect("org.guardian.Agent", obj_path)
-                    obj = bus.get_proxy_object("org.guardian.Agent", obj_path, proxy)
-                    iface = obj.get_interface("org.guardian.Agent")
-                    agent_username = await iface.call_get_username()
-                    # Try to get service type from SessionTracker
-                    session_info = None
-                    for s in self.tracker.active_sessions.values():
-                        if (
-                            s.get("agent_path") == obj_path
-                            and s["username"] == username
-                        ):
-                            session_info = s
-                            break
-                    service = session_info["service"] if session_info else None
-                    desktop = session_info["desktop"] if session_info else None
-                    if service == "systemd-user" or not desktop:
-                        logger.debug(
-                            f"Skipping notification for agent {obj_path}: service={service}, desktop={desktop}"
-                        )
+            for agent_name in agent_names:
+                for obj_path in ["/org/guardian/Agent"] + [
+                    f"/org/guardian/Agent{i}" for i in range(1, 10)
+                ]:
+                    try:
+                        proxy = await bus.introspect(agent_name, obj_path)
+                        obj = bus.get_proxy_object(agent_name, obj_path, proxy)
+                        iface = obj.get_interface("org.guardian.Agent")
+                        agent_username = await iface.call_get_username()
+                        session_info = None
+                        for s in self.tracker.active_sessions.values():
+                            if (
+                                s.get("agent_path") == obj_path
+                                and s["username"] == username
+                            ):
+                                session_info = s
+                                break
+                        service = session_info["service"] if session_info else None
+                        desktop = session_info["desktop"] if session_info else None
+                        if service == "systemd-user" or not desktop:
+                            logger.debug(
+                                f"Skipping notification for agent {agent_name} at {obj_path}: service={service}, desktop={desktop}"
+                            )
+                            continue
+                        if agent_username == username:
+                            await iface.call_notify_user(message, category)
+                            logger.info(
+                                f"Message sent to Agent {agent_name} at {obj_path} for user {username}."
+                            )
+                            notified = True
+                    except DBusError:
                         continue
-                    if agent_username == username:
-                        await iface.call_notify_user(message, category)
-                        logger.info(
-                            f"Message sent to Agent {obj_path} for user {username}."
+                    except Exception as e:
+                        logger.error(
+                            f"Notify error for Agent {agent_name} at {obj_path}: {e}"
                         )
-                        notified = True
-                except DBusError:
-                    continue
-                except Exception as e:
-                    logger.error(f"Notify error for Agent {obj_path}: {e}")
+            # If not notified, fall back to discovery
+            if not notified:
+                logger.info(
+                    f"No notification sent using cached mapping for {username}, trying discovery."
+                )
+                agent_names = await self.tracker.discover_agent_names_for_user(username)
+                for agent_name in agent_names:
+                    for obj_path in ["/org/guardian/Agent"] + [
+                        f"/org/guardian/Agent{i}" for i in range(1, 10)
+                    ]:
+                        try:
+                            proxy = await bus.introspect(agent_name, obj_path)
+                            obj = bus.get_proxy_object(agent_name, obj_path, proxy)
+                            iface = obj.get_interface("org.guardian.Agent")
+                            agent_username = await iface.call_get_username()
+                            session_info = None
+                            for s in self.tracker.active_sessions.values():
+                                if (
+                                    s.get("agent_path") == obj_path
+                                    and s["username"] == username
+                                ):
+                                    session_info = s
+                                    break
+                            service = session_info["service"] if session_info else None
+                            desktop = session_info["desktop"] if session_info else None
+                            if service == "systemd-user" or not desktop:
+                                logger.debug(
+                                    f"Skipping notification for agent {agent_name} at {obj_path}: service={service}, desktop={desktop}"
+                                )
+                                continue
+                            if agent_username == username:
+                                await iface.call_notify_user(message, category)
+                                logger.info(
+                                    f"Message sent to Agent {agent_name} at {obj_path} for user {username}."
+                                )
+                                notified = True
+                        except DBusError:
+                            continue
+                        except Exception as e:
+                            logger.error(
+                                f"Notify error for Agent {agent_name} at {obj_path}: {e}"
+                            )
             if not notified:
                 logger.warning(f"No Agent for user {username} reachable.")
 
