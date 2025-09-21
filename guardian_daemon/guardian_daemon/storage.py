@@ -41,6 +41,22 @@ class Storage:
                 )
         return boot_time + (logind_timestamp / 1_000_000)
 
+    def update_session_progress(self, session_id: str, duration: float):
+        """
+        Periodically update session entry with current duration (while session is active).
+        """
+        c = self.conn.cursor()
+        logger.debug(
+            f"Updating session progress for session_id: {session_id}, duration: {duration}"
+        )
+        c.execute(
+            """
+            UPDATE sessions SET duration = ? WHERE session_id = ? AND (end_time = 0 OR end_time IS NULL)
+            """,
+            (duration, session_id),
+        )
+        self.conn.commit()
+
     def get_user_settings(self, username: str) -> Optional[dict]:
         """
         Retrieve user settings from the database for the given username.

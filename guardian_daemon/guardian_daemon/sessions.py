@@ -95,6 +95,7 @@ class SessionTracker:
     ):
         """
         Called via D-Bus/IPC from agent to record lock/unlock events for a session.
+        Also updates session progress in the database.
         """
         if session_id not in self.active_sessions:
             logger.warning(f"Lock event for unknown session: {session_id}")
@@ -116,6 +117,21 @@ class SessionTracker:
                         f"Session {session_id}: screen unlocked at {timestamp}"
                     )
                     break
+        # Update session progress in DB after lock event
+        now = time.monotonic()
+        duration = now - self.active_sessions[session_id]["start_time"]
+        self.storage.update_session_progress(session_id, duration)
+
+    async def periodic_session_update(self, interval: int = 60):
+        """
+        Periodically update all active sessions in the database with current duration.
+        """
+        while True:
+            now = time.monotonic()
+            for session_id, session in self.active_sessions.items():
+                duration = now - session["start_time"]
+                self.storage.update_session_progress(session_id, duration)
+            await asyncio.sleep(interval)
 
     def __init__(self, policy: Policy, config: dict):
         """
@@ -129,8 +145,34 @@ class SessionTracker:
         db_path = config.get("db_path", "guardian.sqlite")
         self.storage = Storage(db_path)
         self.active_sessions: dict[str, dict] = {}
-        # Placeholder for lock event tracking (now handled by agent)
         self.session_locks: dict[str, list[tuple[float, float | None]]] = {}
+
+        # Restore active sessions from database (sessions with no end_time)
+        self._restore_active_sessions()
+
+    def _restore_active_sessions(self):
+        """
+        Restore sessions that are still open (no end_time) from the database into active_sessions.
+        """
+        c = self.storage.conn.cursor()
+        c.execute(
+            "SELECT session_id, username, uid, start_time, desktop, service FROM sessions WHERE end_time IS NULL OR end_time = 0"
+        )
+        rows = c.fetchall()
+        for row in rows:
+            session_id, username, uid, start_time, desktop, service = row
+            self.active_sessions[session_id] = {
+                "uid": uid,
+                "username": username,
+                "start_time": start_time,
+                "desktop": desktop,
+                "service": service,
+            }
+            self.session_locks[session_id] = []
+        if rows:
+            logger.info(
+                f"Restored {len(rows)} active sessions from database on startup."
+            )
 
     def handle_login(self, session_id, uid, username, props):
         """
@@ -266,11 +308,10 @@ class SessionTracker:
         """
         Start session tracking, connect to systemd-logind via DBus, and listen for KDE lock events.
         Also checks for already logged-in child sessions on startup.
+        Periodically updates session progress in the database.
         """
         bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-        # Request and hold the org.guardian.Daemon name
         await bus.request_name("org.guardian.Daemon")
-        # Export D-Bus interface for agent lock events
         daemon_iface = GuardianDaemonInterface(self)
         bus.export("/org/guardian/Daemon", daemon_iface)
         introspection = await bus.introspect(
@@ -285,7 +326,6 @@ class SessionTracker:
         sessions = await manager.call_list_sessions()
         kids = set(self.policy.data.get("users", {}).keys())
         for session_info in sessions:
-            # session_info: (session_id, uid, user, seat, object_path)
             session_id, uid, username, seat, object_path = session_info
             if username in kids:
                 try:
@@ -297,7 +337,6 @@ class SessionTracker:
                     session_iface = session_obj.get_interface(
                         "org.freedesktop.login1.Session"
                     )
-                    # Gather properties
                     props = {}
                     introspection = await bus.introspect(
                         "org.freedesktop.login1", object_path
@@ -325,7 +364,6 @@ class SessionTracker:
                         props = {
                             "error": "Session interface not found in introspection"
                         }
-                    # Run setup for already logged-in child
                     logger.info(
                         f"Startup: found active child session {session_id} for {username}"
                     )
@@ -335,40 +373,8 @@ class SessionTracker:
                         f"Error processing existing session {session_id} for {username}: {e}"
                     )
 
-        async def get_session_info(object_path):
-            try:
-                introspection = await bus.introspect(
-                    "org.freedesktop.login1", object_path
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Could not introspect session object {object_path}: {e}"
-                )
-                return None
-            session_obj = bus.get_proxy_object(
-                "org.freedesktop.login1",
-                object_path,
-                introspection,
-            )
-            session_iface = session_obj.get_interface("org.freedesktop.login1.Session")
-            # Username
-            username = await session_iface.get_name()
-            # UID
-            user_struct = await session_iface.get_user()
-            uid = (
-                user_struct[0]
-                if isinstance(user_struct, (list, tuple))
-                else user_struct
-            )
-            return username, uid
-
         def session_new_handler(session_id, object_path):
-            """
-            Handle new session event.
-            """
-
             async def inner():
-                # Session-Objekt holen
                 session_obj = bus.get_proxy_object(
                     "org.freedesktop.login1",
                     object_path,
@@ -377,7 +383,6 @@ class SessionTracker:
                 session_iface = session_obj.get_interface(
                     "org.freedesktop.login1.Session"
                 )
-                # Alle Properties dynamisch auslesen
                 props = {}
                 introspection = await bus.introspect(
                     "org.freedesktop.login1", object_path
@@ -403,7 +408,6 @@ class SessionTracker:
                             props[prop] = "[NO GETTER]"
                 else:
                     props = {"error": "Session interface not found in introspection"}
-                # Hole Name und User explizit
                 username = props.get("Name", None)
                 user_struct = props.get("User", None)
                 uid = (
@@ -413,11 +417,10 @@ class SessionTracker:
                 )
                 kids = set(self.policy.data.get("users", {}).keys())
                 if username not in kids:
-                    logger.info(
+                    logger.debug(
                         f"Ignoring session from {username} (UID {uid}) Session {session_id}"
                     )
                     return
-                # print(f"[DEBUG] Alle Session-Properties für {session_id}: {props}")
                 logger.debug(
                     f"Extracted: Name={username}, UID={uid}, Desktop={props.get('Desktop')}, Service={props.get('Service')}"
                 )
@@ -426,11 +429,13 @@ class SessionTracker:
             asyncio.create_task(inner())
 
         def session_removed_handler(session_id, object_path):
-            # Keine D-Bus-Abfrage mehr, sondern lokale Daten nutzen
             self.handle_logout(session_id)
 
         manager.on_session_new(session_new_handler)
         manager.on_session_removed(session_removed_handler)
+
+        # Start periodic session update task
+        asyncio.create_task(self.periodic_session_update(interval=60))
 
         logger.info("SessionTracker running. Waiting for logins/logouts...")
         while True:
@@ -468,6 +473,16 @@ class SessionTracker:
         Return a list of currently active usernames.
         """
         return [session["username"] for session in self.active_sessions.values()]
+
+    def pause_user_time(self, username, timestamp):
+        """
+        Pause time tracking for a user when a lock event is received for an unknown session.
+        """
+        # Implementation: mark user as locked, store timestamp
+        if not hasattr(self, "user_locks"):
+            self.user_locks = {}
+        self.user_locks[username] = timestamp
+        logger.info(f"User {username} time tracking paused at {timestamp}.")
 
 
 class GuardianDaemonInterface(ServiceInterface):
@@ -513,15 +528,7 @@ class GuardianDaemonInterface(ServiceInterface):
         self.session_tracker.receive_lock_event(session_id, username, locked, timestamp)
         return None
 
-    def pause_user_time(self, username, timestamp):
-        """
-        Pause time tracking for a user when a lock event is received for an unknown session.
-        """
-        # Implementation: mark user as locked, store timestamp
-        if not hasattr(self, "user_locks"):
-            self.user_locks = {}
-        self.user_locks[username] = timestamp
-        logger.info(f"User {username} time tracking paused at {timestamp}.")
+    # pause_user_time is now implemented in SessionTracker
 
 
 if __name__ == "__main__":
