@@ -43,11 +43,46 @@ class GuardianDaemon:
         db_path = config.get("db_path", "guardian.sqlite")
         self.policy = Policy()
         self.storage = Storage(db_path)
-        self.pam = UserManager(self.policy)
+        self.usermanager = UserManager(self.policy)
         self.systemd = SystemdManager()
         self.tracker = SessionTracker(self.policy, config)
         self.enforcer = Enforcer(self.policy, self.tracker)
         self.last_config = self._get_config_snapshot()
+        self.agent_paths = {}  # username -> dbus object path
+        self.agent_path_retry = 5  # seconds between retries
+        self.agent_path_attempts = 6  # total attempts
+
+    async def find_agent_path(self, username):
+        """
+        Poll for the agent D-Bus object path for a given username.
+        Returns the object path if found, else None.
+        """
+        import asyncio
+
+        from dbus_next.aio import MessageBus
+        from dbus_next.constants import BusType
+
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        # Try /org/guardian/Agent, /org/guardian/Agent2, ... up to Agent10
+        for attempt in range(self.agent_path_attempts):
+            for n in range(1, 11):
+                if n == 1:
+                    obj_path = "/org/guardian/Agent"
+                else:
+                    obj_path = f"/org/guardian/Agent{n}"
+                try:
+                    proxy = await bus.introspect("org.guardian.Agent", obj_path)
+                    iface = bus.get_proxy_object(
+                        "org.guardian.Agent", obj_path, proxy
+                    ).get_interface("org.guardian.Agent")
+                    agent_username = await iface.call_get_username()
+                    if agent_username == username:
+                        self.agent_paths[username] = obj_path
+                        return obj_path
+                except Exception:
+                    continue
+            await asyncio.sleep(self.agent_path_retry)
+        return None
 
     def _get_config_snapshot(self):
         """
@@ -69,8 +104,8 @@ class GuardianDaemon:
             new_snapshot = self._get_config_snapshot()
             if new_snapshot != old_snapshot:
                 logger.info("Config changed, updating timers and UserManager rules.")
-                self.pam = UserManager(self.policy)
-                self.pam.write_time_rules()
+                self.usermanager = UserManager(self.policy)
+                self.usermanager.write_time_rules()
                 reset_time = self.policy.data.get("reset_time", "03:00")
                 self.systemd.create_daily_reset_timer(reset_time)
                 # Curfew timer update (example: use start/end from policy)
@@ -89,6 +124,14 @@ class GuardianDaemon:
             await asyncio.sleep(60)  # Check every minute
             active_users = self.tracker.get_active_users()
             for username in active_users:
+                # Check if agent path is known, else try to find it
+                if username not in self.agent_paths:
+                    path = await self.find_agent_path(username)
+                    if path:
+                        logger.info(f"[DAEMON] Found agent for {username} at {path}")
+                    else:
+                        logger.warning(f"[DAEMON] Could not find agent for {username}")
+                # Now you can send notifications via D-Bus if needed
                 self.enforcer.enforce_user(username)
 
     def check_and_recover_reset(self):
@@ -119,7 +162,9 @@ class GuardianDaemon:
         """
         Starts all components and tasks of the daemon.
         """
-        self.pam.write_time_rules()
+        self.usermanager.write_time_rules()
+        self.usermanager.ensure_kids_group()
+        self.usermanager.setup_dbus_policy()
         reset_time = self.policy.data.get("reset_time", "03:00")
         self.systemd.create_daily_reset_timer(reset_time)
         # Curfew timer setup (example: use start/end from policy)

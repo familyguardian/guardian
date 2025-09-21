@@ -1,2 +1,0 @@
-# Guardian Agent D-Bus path lock file
-# Format: <session_num> <pid>

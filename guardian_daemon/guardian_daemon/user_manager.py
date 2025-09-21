@@ -16,6 +16,73 @@ TIME_CONF_PATH = Path("/etc/security/time.conf")
 
 
 class UserManager:
+    def ensure_kids_group(self):
+        """
+        Ensure the 'kids' group exists and all managed users are members of it.
+        """
+        import grp
+        import pwd
+        import subprocess
+
+        group_name = "kids"
+        users = set(self.policy.data.get("users", {}).keys())
+
+        # Check if group exists, create if not
+        try:
+            grp.getgrnam(group_name)
+            logger.debug(f"Group '{group_name}' already exists.")
+        except KeyError:
+            logger.info(f"Creating group '{group_name}'.")
+            subprocess.run(["groupadd", group_name], check=True)
+
+        # Add each user to the group
+        for username in users:
+            try:
+                pwd.getpwnam(username)
+            except KeyError:
+                logger.warning(f"User '{username}' does not exist on system.")
+                continue
+            groups = [g.gr_name for g in grp.getgrall() if username in g.gr_mem]
+            if group_name not in groups:
+                logger.info(f"Adding user '{username}' to group '{group_name}'.")
+                subprocess.run(["usermod", "-aG", group_name, username], check=True)
+            else:
+                logger.debug(f"User '{username}' is already in group '{group_name}'.")
+
+    def setup_dbus_policy(self):
+        """
+        Creates /etc/dbus-1/system.d/guardian.conf to allow group 'kids' access to org.guardian.Daemon.
+        """
+        policy_path = Path("/etc/dbus-1/system.d/guardian.conf")
+        policy_xml = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+        "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+        <busconfig>
+            <policy group=\"kids\">
+                <allow send_destination=\"org.guardian.Daemon\"/>
+                <allow receive_sender=\"org.guardian.Daemon\"/>
+                <allow own=\"org.guardian.Agent\"/>
+                <allow send_destination=\"org.guardian.Agent\"/>
+                <allow receive_sender=\"org.guardian.Agent\"/>
+            </policy>
+            <policy user=\"root\">
+                <allow own=\"org.guardian.Daemon\"/>
+                <allow send_destination=\"org.guardian.Daemon\"/>
+                <allow receive_sender=\"org.guardian.Daemon\"/>
+                <allow send_destination=\"org.guardian.Agent\"/>
+                <allow receive_sender=\"org.guardian.Agent\"/>
+                <allow own=\"org.guardian.Agent\"/>
+            </policy>
+        </busconfig>
+        """.strip()
+        try:
+            with open(policy_path, "w") as f:
+                f.write(policy_xml)
+            logger.info(
+                f"D-Bus policy file written to {policy_path} for group 'kids' and user 'root'."
+            )
+        except Exception as e:
+            logger.error(f"Failed to write D-Bus policy file: {e}")
+
     """
     Manages user-specific configurations, including PAM time rules and systemd services.
     """

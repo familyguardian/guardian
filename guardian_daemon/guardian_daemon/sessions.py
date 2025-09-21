@@ -23,6 +23,38 @@ logger = get_logger("SessionTracker")
 
 
 class SessionTracker:
+    """
+    Monitors and stores user sessions, checks quota and curfew.
+    Connects to systemd-logind via DBus.
+    """
+
+    def get_total_time(self, username: str) -> float:
+        """
+        Returns the total usage time (in minutes) for the given user today.
+        """
+        reset_time = self.policy.data.get("reset_time", "03:00")
+        now = datetime.datetime.now(datetime.timezone.utc).astimezone()
+        reset_hour, reset_minute = map(int, reset_time.split(":"))
+        today_reset = now.replace(
+            hour=reset_hour, minute=reset_minute, second=0, microsecond=0
+        )
+        if now < today_reset:
+            last_reset = today_reset - datetime.timedelta(days=1)
+        else:
+            last_reset = today_reset
+
+        sessions = self.storage.get_sessions_for_user(
+            username, since=last_reset.timestamp()
+        )
+        filtered_sessions = [
+            s for s in sessions if s[6] > 30
+        ]  # s[6] = duration (seconds)
+        total_minutes = sum((s[6] for s in filtered_sessions)) / 60
+        for session in self.active_sessions.values():
+            if session["username"] == username:
+                total_minutes += (time.monotonic() - session["start_time"]) / 60
+        return total_minutes
+
     def get_remaining_time(self, username: str) -> float:
         """
         Returns the remaining allowed time (in minutes) for the given user today.
@@ -57,11 +89,6 @@ class SessionTracker:
                 total_minutes += (time.monotonic() - session["start_time"]) / 60
         remaining = quota - total_minutes
         return max(0, remaining)
-
-    """
-    Monitors and stores user sessions, checks quota and curfew.
-    Connects to systemd-logind via DBus.
-    """
 
     def receive_lock_event(
         self, session_id: str, username: str, locked: bool, timestamp: float
@@ -124,7 +151,7 @@ class SessionTracker:
         self.active_sessions[session_id] = {
             "uid": uid,
             "username": username,
-            "start_time": time.monotonic(),
+            "start_time": time.time(),  # UNIX epoch
         }
         self.session_locks[session_id] = []
 
@@ -231,7 +258,7 @@ class SessionTracker:
 
         for session in self.active_sessions.values():
             if session["username"] == username:
-                total_minutes += (time.monotonic() - session["start_time"]) / 60
+                total_minutes += (time.time() - session["start_time"]) / 60
 
         return total_minutes < quota
 
@@ -241,6 +268,8 @@ class SessionTracker:
         Also checks for already logged-in child sessions on startup.
         """
         bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        # Request and hold the org.guardian.Daemon name
+        await bus.request_name("org.guardian.Daemon")
         # Export D-Bus interface for agent lock events
         daemon_iface = GuardianDaemonInterface(self)
         bus.export("/org/guardian/Daemon", daemon_iface)
@@ -307,10 +336,19 @@ class SessionTracker:
                     )
 
         async def get_session_info(object_path):
+            try:
+                introspection = await bus.introspect(
+                    "org.freedesktop.login1", object_path
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Could not introspect session object {object_path}: {e}"
+                )
+                return None
             session_obj = bus.get_proxy_object(
                 "org.freedesktop.login1",
                 object_path,
-                await bus.introspect("org.freedesktop.login1", object_path),
+                introspection,
             )
             session_iface = session_obj.get_interface("org.freedesktop.login1.Session")
             # Username
@@ -375,8 +413,8 @@ class SessionTracker:
                 )
                 kids = set(self.policy.data.get("users", {}).keys())
                 if username not in kids:
-                    print(
-                        f"Ignoriere Session von {username} (UID {uid}) Session {session_id}"
+                    logger.info(
+                        f"Ignoring session from {username} (UID {uid}) Session {session_id}"
                     )
                     return
                 # print(f"[DEBUG] Alle Session-Properties für {session_id}: {props}")
@@ -438,15 +476,52 @@ class GuardianDaemonInterface(ServiceInterface):
         self.session_tracker = session_tracker
 
     @method()
-    def LockEvent(self, session_id: str, username: str, locked: bool, timestamp: float):
+    def LockEvent(
+        self, session_id: "s", username: "s", locked: "b", timestamp: "d"  # noqa: F821
+    ):
         """
         Receives lock/unlock events from agents and forwards to SessionTracker.
         """
+        import inspect
+
+        # Try to get sender from D-Bus context if available
+        sender = None
+        try:
+            frame = inspect.currentframe()
+            while frame:
+                if "message" in frame.f_locals:
+                    sender = getattr(frame.f_locals["message"], "sender", None)
+                    break
+                frame = frame.f_back
+        except Exception:
+            sender = None
         logger.info(
-            f"Received LockEvent: session={session_id} user={username} locked={locked} ts={timestamp}"
+            f"Received LockEvent: session={session_id} user={username} locked={locked} ts={timestamp} sender={sender}"
         )
+        # If session is unknown, log and pause time tracking for locked=True
+        if session_id not in self.session_tracker.active_sessions:
+            logger.warning(
+                f"Lock event for unknown session: {session_id} from sender={sender} user={username}"
+            )
+            # Optionally, pause time tracking for this user
+            if locked:
+                logger.info(
+                    f"Pausing time tracking for user {username} due to lock event from unknown session."
+                )
+                self.session_tracker.pause_user_time(username, timestamp)
+            return None
         self.session_tracker.receive_lock_event(session_id, username, locked, timestamp)
         return None
+
+    def pause_user_time(self, username, timestamp):
+        """
+        Pause time tracking for a user when a lock event is received for an unknown session.
+        """
+        # Implementation: mark user as locked, store timestamp
+        if not hasattr(self, "user_locks"):
+            self.user_locks = {}
+        self.user_locks[username] = timestamp
+        logger.info(f"User {username} time tracking paused at {timestamp}.")
 
 
 if __name__ == "__main__":

@@ -113,44 +113,40 @@ class Enforcer:
         """
         Sends a desktop notification to all matching agents of the given user (via D-Bus).
         """
-        try:
-            import asyncio
+        import asyncio
 
-            from dbus_next import DBusError
-            from dbus_next.aio import MessageBus
+        from dbus_next import DBusError
+        from dbus_next.aio import MessageBus
 
-            async def send():
-                bus = await MessageBus().connect()
-                # Enumerate all possible agent instances (e.g., per session)
-                # For simplicity, try common session paths and ignore errors
-                notified = False
-                for session_num in range(1, 10):
-                    obj_path = (
-                        f"/org/guardian/Agent{session_num}"
-                        if session_num > 1
-                        else "/org/guardian/Agent"
-                    )
-                    try:
-                        proxy = await bus.introspect("org.guardian.Agent", obj_path)
-                        obj = bus.get_proxy_object(
-                            "org.guardian.Agent", obj_path, proxy
+        async def send():
+            bus = await MessageBus().connect()
+            notified = False
+            for session_num in range(1, 10):
+                obj_path = (
+                    f"/org/guardian/Agent{session_num}"
+                    if session_num > 1
+                    else "/org/guardian/Agent"
+                )
+                try:
+                    proxy = await bus.introspect("org.guardian.Agent", obj_path)
+                    obj = bus.get_proxy_object("org.guardian.Agent", obj_path, proxy)
+                    iface = obj.get_interface("org.guardian.Agent")
+                    agent_username = await iface.call_get_username()
+                    if agent_username == username:
+                        await iface.call_notify_user(message, category)
+                        logger.info(
+                            f"Message sent to Agent {obj_path} for user {username}."
                         )
-                        iface = obj.get_interface("org.guardian.Agent")
-                        agent_username = await iface.call_get_username()
-                        if agent_username == username:
-                            await iface.call_notify_user(message, category)
-                            logger.info(
-                                f"Message sent to Agent {obj_path} for user {username}."
-                            )
-                            notified = True
-                    except DBusError:
-                        continue
-                    except Exception as e:
-                        logger.error(f"Notify error for Agent {obj_path}: {e}")
-                if not notified:
-                    logger.warning(f"No Agent for user {username} reachable.")
+                        notified = True
+                except DBusError:
+                    continue
+                except Exception as e:
+                    logger.error(f"Notify error for Agent {obj_path}: {e}")
+            if not notified:
+                logger.warning(f"No Agent for user {username} reachable.")
 
-            asyncio.run(send())
+        try:
+            asyncio.create_task(send())
         except Exception as e:
             logger.error(f"Notify error for {username}: {message} ({e})")
 

@@ -41,8 +41,8 @@ def setup_logging():
     cfg = load_logging_config()
     level = getattr(logging, cfg["level"].upper(), logging.INFO)
     processors = [
-        structlog.processors.TimeStamper(fmt="iso"),
         structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
     ]
     if cfg["format"] == "json":
         processors.append(structlog.processors.JSONRenderer())
@@ -56,11 +56,7 @@ def setup_logging():
     )
     logging.basicConfig(
         level=level,
-        format=(
-            "%(message)s"
-            if cfg["format"] == "json"
-            else "[%(asctime)s] [%(levelname)s] %(message)s"
-        ),
+        format="%(message)s",
     )
 
 
