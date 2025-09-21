@@ -53,7 +53,7 @@ class Enforcer:
             logger.info(f"User {username} has used 50% of their time.")
             self.notify_user(username, "50% of your time is used.", category="info")
 
-    def handle_grace_period(self, username):
+    async def handle_grace_period(self, username):
         """
         Handles the grace period by notifying the user every minute until time is up.
         """
@@ -67,6 +67,9 @@ class Enforcer:
             )
             logger.info(f"User {username} grace time left: {grace_time} minutes.")
             grace_time -= 1
+            import asyncio
+
+            await asyncio.sleep(1)
 
         self.terminate_session(username)
         self.notify_user(
@@ -76,7 +79,8 @@ class Enforcer:
 
     def terminate_session(self, username):
         """
-        Terminates all running sessions of the user (via systemd loginctl).
+        Terminates all running desktop sessions of the user (via systemd loginctl).
+        Only sessions with a desktop environment (not systemd-user/service) are targeted.
         """
         import subprocess
 
@@ -92,16 +96,34 @@ class Enforcer:
             for line in result.stdout.strip().split("\n"):
                 parts = line.split()
                 if len(parts) >= 3 and parts[2] == username:
-                    sessions.append(parts[0])
+                    session_id = parts[0]
+                    # Try to get session details from tracker
+                    session_info = self.tracker.active_sessions.get(session_id)
+                    service = session_info["service"] if session_info else None
+                    desktop = session_info["desktop"] if session_info else None
+                    logger.info(
+                        f"Found session: id={session_id}, service={service}, desktop={desktop}, username={username}"
+                    )
+                    # Only terminate if desktop is set and service is not systemd-user
+                    if desktop and service != "systemd-user":
+                        sessions.append(session_id)
+                    else:
+                        logger.info(
+                            f"Skipping session {session_id}: not a desktop session (service={service}, desktop={desktop})"
+                        )
             if not sessions:
-                logger.warning(f"No active sessions found for {username} to terminate.")
+                logger.warning(
+                    f"No active desktop sessions found for {username} to terminate."
+                )
                 return
             for session_id in sessions:
                 try:
                     subprocess.run(
                         ["loginctl", "terminate-session", session_id], check=True
                     )
-                    logger.info(f"Terminated session {session_id} for user {username}.")
+                    logger.info(
+                        f"Terminated desktop session {session_id} for user {username}."
+                    )
                 except Exception as e:
                     logger.error(
                         f"Failed to terminate session {session_id} for user {username}: {e}"
@@ -117,9 +139,51 @@ class Enforcer:
 
         from dbus_next import DBusError
         from dbus_next.aio import MessageBus
+        from dbus_next.constants import BusType
 
         async def send():
-            bus = await MessageBus().connect()
+            bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+            notified = False
+            # Get agent paths for this user from session tracker
+            agent_paths = self.tracker.get_agent_paths_for_user(username)
+            if not agent_paths:
+                logger.warning(f"No agent paths found for user {username}.")
+            for obj_path in agent_paths:
+                try:
+                    proxy = await bus.introspect("org.guardian.Agent", obj_path)
+                    obj = bus.get_proxy_object("org.guardian.Agent", obj_path, proxy)
+                    iface = obj.get_interface("org.guardian.Agent")
+                    agent_username = await iface.call_get_username()
+                    # Filter out systemd-user sessions
+                    # Try to get service type from SessionTracker
+                    session_info = None
+                    for s in self.tracker.active_sessions.values():
+                        if (
+                            s.get("agent_path") == obj_path
+                            and s["username"] == username
+                        ):
+                            session_info = s
+                            break
+                    service = session_info["service"] if session_info else None
+                    desktop = session_info["desktop"] if session_info else None
+                    if service == "systemd-user" or not desktop:
+                        logger.debug(
+                            f"Skipping notification for agent {obj_path}: service={service}, desktop={desktop}"
+                        )
+                        continue
+                    if agent_username == username:
+                        await iface.call_notify_user(message, category)
+                        logger.info(
+                            f"Message sent to Agent {obj_path} for user {username}."
+                        )
+                        notified = True
+                except DBusError:
+                    continue
+                except Exception as e:
+                    logger.error(f"Notify error for Agent {obj_path}: {e}")
+            if not notified:
+                logger.warning(f"No Agent for user {username} reachable.")
+            bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
             notified = False
             for session_num in range(1, 10):
                 obj_path = (
@@ -132,6 +196,22 @@ class Enforcer:
                     obj = bus.get_proxy_object("org.guardian.Agent", obj_path, proxy)
                     iface = obj.get_interface("org.guardian.Agent")
                     agent_username = await iface.call_get_username()
+                    # Try to get service type from SessionTracker
+                    session_info = None
+                    for s in self.tracker.active_sessions.values():
+                        if (
+                            s.get("agent_path") == obj_path
+                            and s["username"] == username
+                        ):
+                            session_info = s
+                            break
+                    service = session_info["service"] if session_info else None
+                    desktop = session_info["desktop"] if session_info else None
+                    if service == "systemd-user" or not desktop:
+                        logger.debug(
+                            f"Skipping notification for agent {obj_path}: service={service}, desktop={desktop}"
+                        )
+                        continue
                     if agent_username == username:
                         await iface.call_notify_user(message, category)
                         logger.info(

@@ -28,6 +28,36 @@ class SessionTracker:
     Connects to systemd-logind via DBus.
     """
 
+    def get_agent_paths_for_user(self, username: str):
+        """
+        Returns a list of D-Bus object paths for agents belonging to the given user.
+        This should be tracked in active_sessions as 'agent_path' if available, otherwise default to /org/guardian/Agent or numbered agents.
+        """
+        # If agent_path is tracked in session, collect all for user
+        paths = []
+        for session in self.active_sessions.values():
+            if session["username"] == username:
+                agent_path = session.get("agent_path")
+                if agent_path:
+                    paths.append(agent_path)
+        # Fallback: try default paths if none found
+        if not paths:
+            # Try default and numbered agent paths
+            paths = [f"/org/guardian/Agent{i}" for i in range(1, 10)]
+            paths.insert(0, "/org/guardian/Agent")
+        return paths
+
+    def get_user_sessions(self, username: str):
+        """
+        Returns a list of active session details for the given user.
+        Each item is a dict with session_id, service, desktop, start_time, etc.
+        """
+        return [
+            {"session_id": sid, **session}
+            for sid, session in self.active_sessions.items()
+            if session["username"] == username
+        ]
+
     def get_total_time(self, username: str) -> float:
         """
         Returns the total usage time (in minutes) for the given user today.
@@ -47,12 +77,12 @@ class SessionTracker:
             username, since=last_reset.timestamp()
         )
         filtered_sessions = [
-            s for s in sessions if s[6] > 30
-        ]  # s[6] = duration (seconds)
+            s for s in sessions if s[6] > 30 and s[8] != "systemd-user"
+        ]  # s[6] = duration (seconds), s[8] = service
         total_minutes = sum((s[6] for s in filtered_sessions)) / 60
         for session in self.active_sessions.values():
             if session["username"] == username:
-                total_minutes += (time.monotonic() - session["start_time"]) / 60
+                total_minutes += (time.time() - session["start_time"]) / 60
         return total_minutes
 
     def get_remaining_time(self, username: str) -> float:
@@ -81,12 +111,12 @@ class SessionTracker:
             username, since=last_reset.timestamp()
         )
         filtered_sessions = [
-            s for s in sessions if s[6] > 30
-        ]  # s[6] = duration (seconds)
+            s for s in sessions if s[6] > 30 and s[8] != "systemd-user"
+        ]  # s[6] = duration (seconds), s[8] = service
         total_minutes = sum((s[6] for s in filtered_sessions)) / 60
         for session in self.active_sessions.values():
             if session["username"] == username:
-                total_minutes += (time.monotonic() - session["start_time"]) / 60
+                total_minutes += (time.time() - session["start_time"]) / 60
         remaining = quota - total_minutes
         return max(0, remaining)
 
@@ -118,7 +148,7 @@ class SessionTracker:
                     )
                     break
         # Update session progress in DB after lock event
-        now = time.monotonic()
+        now = time.time()
         duration = now - self.active_sessions[session_id]["start_time"]
         self.storage.update_session_progress(session_id, duration)
 
@@ -127,7 +157,7 @@ class SessionTracker:
         Periodically update all active sessions in the database with current duration.
         """
         while True:
-            now = time.monotonic()
+            now = time.time()
             for session_id, session in self.active_sessions.items():
                 duration = now - session["start_time"]
                 self.storage.update_session_progress(session_id, duration)
@@ -241,7 +271,7 @@ class SessionTracker:
                     f"Ignoring logout from {session['username']} Session {session_id}"
                 )
                 return
-            end_time = time.monotonic()
+            end_time = time.time()  # Store as epoch
             duration = end_time - session["start_time"]
             # Deduct locked time
             locked_time = 0.0
@@ -251,6 +281,11 @@ class SessionTracker:
                 else:
                     locked_time += max(0.0, end_time - lock_start)
             effective_duration = duration - locked_time
+            if effective_duration < 0:
+                logger.warning(
+                    f"Negative session duration detected for {session_id}, setting to 0."
+                )
+                effective_duration = 0.0
             logger.debug(
                 f"Session {session_id}: raw duration={duration:.1f}s, locked={locked_time:.1f}s, effective={effective_duration:.1f}s"
             )

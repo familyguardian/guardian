@@ -36,7 +36,7 @@ class GuardianAgentInterface(ServiceInterface):
     @method()
     async def NotifyUser(
         self, message: "s", category: "s" = "info"  # noqa: F821
-    ) -> "v":  # noqa: F821
+    ) -> "s":  # noqa: F821
         """
         Show a desktop notification to the user with the given message and category.
         """
@@ -68,7 +68,7 @@ class GuardianAgentInterface(ServiceInterface):
                 message,
             ]
         )
-        return None
+        return ""
 
 
 async def main():
@@ -118,8 +118,10 @@ async def main():
     # Create all D-Bus sessions/interfaces at startup
     interface = GuardianAgentInterface(username)
     system_bus.export(obj_path, interface)
+    # Request the well-known name so daemon can reach us
+    await system_bus.request_name("org.guardian.Agent")
     logger.info(
-        f"Guardian Agent listening for notifications for user: {username} on {obj_path}"
+        f"Guardian Agent listening for notifications for user: {username} on {obj_path} (name org.guardian.Agent)"
     )
 
     # Pass both buses to LockEventReporter and any other D-Bus components
