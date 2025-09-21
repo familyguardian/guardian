@@ -1,0 +1,15 @@
+# this service runs as user systemd service and starts the agent which resides at
+# /usr/local/guardian/guardian_agent as the user whose session just started
+
+[Unit]
+Description=Guardian Agent Service
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/uv run --frozen --directory /usr/local/guardian/guardian_agent python3 -m guardian_agent
+Environment=PYTHONPATH=/usr/local/guardian/guardian_agent
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

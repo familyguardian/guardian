@@ -24,14 +24,14 @@ class GuardianAgentInterface(ServiceInterface):
         self.username = username
 
     @method()
-    async def GetUsername(self):
+    async def GetUsername(self) -> str:
         """
         Return the username registered with this agent instance.
         """
         return self.username
 
     @method()
-    async def NotifyUser(self, message, category="info"):
+    async def NotifyUser(self, message: str, category: str = "info") -> None:
         """
         Show a desktop notification to the user with the given message and category.
         """
@@ -63,20 +63,24 @@ class GuardianAgentInterface(ServiceInterface):
                 message,
             ]
         )
+        return None
 
 
 async def main():
     """
     Main entry point for the Guardian Agent. Registers the D-Bus interface and runs the event loop.
     """
-    bus = await MessageBus().connect()
+    from dbus_next.constants import BusType
+
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
     username = getpass.getuser()
 
     obj_path = os.environ.get("GUARDIAN_AGENT_PATH")
     if not obj_path:
         # Automatic session numbering with cleanup of orphaned entries
 
-        lock_path = os.path.join(os.path.dirname(__file__), "agent_path_lock.txt")
+        lock_path = os.path.expanduser("~/.cache/guardian_agent_lock.txt")
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
         session_num = None
         with open(lock_path, "a+") as lock_file:
             valid_lines = []
@@ -123,8 +127,9 @@ async def main():
         await asyncio.Future()  # run forever
     finally:
         # Remove lock entry on exit
-        lock_path = os.path.join(os.path.dirname(__file__), "agent_path_lock.txt")
+        lock_path = os.path.expanduser("~/.cache/guardian_agent_lock.txt")
         try:
+            os.makedirs(os.path.dirname(lock_path), exist_ok=True)
             with open(lock_path, "r+") as lock_file:
                 fcntl.flock(lock_file, fcntl.LOCK_EX)
                 lines = lock_file.readlines()

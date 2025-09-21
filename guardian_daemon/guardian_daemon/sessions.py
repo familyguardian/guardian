@@ -13,6 +13,7 @@ import time
 import yaml
 from dbus_next.aio import MessageBus
 from dbus_next.constants import BusType
+from dbus_next.service import ServiceInterface, method
 
 from guardian_daemon.logging import get_logger
 from guardian_daemon.policy import Policy
@@ -22,6 +23,41 @@ logger = get_logger("SessionTracker")
 
 
 class SessionTracker:
+    def get_remaining_time(self, username: str) -> float:
+        """
+        Returns the remaining allowed time (in minutes) for the given user today.
+        """
+        user_policy = self.policy.get_user_policy(username)
+        if user_policy is None:
+            return float("inf")  # Unlimited if not monitored
+        quota = user_policy.get("daily_quota_minutes")
+        if quota is None:
+            quota = self.policy.get_default("daily_quota_minutes")
+
+        reset_time = self.policy.data.get("reset_time", "03:00")
+        now = datetime.datetime.now(datetime.timezone.utc).astimezone()
+        reset_hour, reset_minute = map(int, reset_time.split(":"))
+        today_reset = now.replace(
+            hour=reset_hour, minute=reset_minute, second=0, microsecond=0
+        )
+        if now < today_reset:
+            last_reset = today_reset - datetime.timedelta(days=1)
+        else:
+            last_reset = today_reset
+
+        sessions = self.storage.get_sessions_for_user(
+            username, since=last_reset.timestamp()
+        )
+        filtered_sessions = [
+            s for s in sessions if s[6] > 30
+        ]  # s[6] = duration (seconds)
+        total_minutes = sum((s[6] for s in filtered_sessions)) / 60
+        for session in self.active_sessions.values():
+            if session["username"] == username:
+                total_minutes += (time.monotonic() - session["start_time"]) / 60
+        remaining = quota - total_minutes
+        return max(0, remaining)
+
     """
     Monitors and stores user sessions, checks quota and curfew.
     Connects to systemd-logind via DBus.
@@ -72,6 +108,7 @@ class SessionTracker:
     def handle_login(self, session_id, uid, username, props):
         """
         Register a new session on login for child accounts.
+        Also ensure user account is set up: PAM time rules, systemd user service, and agent.
 
         Args:
             session_id (str): Session ID
@@ -90,12 +127,22 @@ class SessionTracker:
             "start_time": time.monotonic(),
         }
         self.session_locks[session_id] = []
+
+        # Ensure user account setup
+        from guardian_daemon.user_manager import UserManager
+
+        user_manager = UserManager(self.policy)
+        user_manager.write_time_rules()
+        user_manager.setup_user_service(username)
+        user_manager.ensure_systemd_user_service(username)
+
+        # Optionally start agent for user (if not managed by systemd)
+        # os.system(f"runuser -l {username} -c 'guardian_agent &'")
+
         # Debug output of all info before writing
         desktop = props.get("Desktop", None)
         service = props.get("Service", None)
-        # print(
-        #     f"[DEBUG] Writing session to DB: session_id={session_id}, username={username}, uid={uid}, start_time={self.active_sessions[session_id]['start_time']}, end_time=0.0, duration=0.0, desktop={desktop}, service={service}"
-        # )
+
         # Create session entry with end_time and duration=0
         self.storage.add_session(
             session_id,
@@ -191,9 +238,12 @@ class SessionTracker:
     async def run(self):
         """
         Start session tracking, connect to systemd-logind via DBus, and listen for KDE lock events.
+        Also checks for already logged-in child sessions on startup.
         """
-
         bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        # Export D-Bus interface for agent lock events
+        daemon_iface = GuardianDaemonInterface(self)
+        bus.export("/org/guardian/Daemon", daemon_iface)
         introspection = await bus.introspect(
             "org.freedesktop.login1", "/org/freedesktop/login1"
         )
@@ -201,6 +251,60 @@ class SessionTracker:
             "org.freedesktop.login1", "/org/freedesktop/login1", introspection
         )
         manager = obj.get_interface("org.freedesktop.login1.Manager")
+
+        # Check for already logged-in child sessions on startup
+        sessions = await manager.call_list_sessions()
+        kids = set(self.policy.data.get("users", {}).keys())
+        for session_info in sessions:
+            # session_info: (session_id, uid, user, seat, object_path)
+            session_id, uid, username, seat, object_path = session_info
+            if username in kids:
+                try:
+                    session_obj = bus.get_proxy_object(
+                        "org.freedesktop.login1",
+                        object_path,
+                        await bus.introspect("org.freedesktop.login1", object_path),
+                    )
+                    session_iface = session_obj.get_interface(
+                        "org.freedesktop.login1.Session"
+                    )
+                    # Gather properties
+                    props = {}
+                    introspection = await bus.introspect(
+                        "org.freedesktop.login1", object_path
+                    )
+                    session_interface = next(
+                        (
+                            iface
+                            for iface in introspection.interfaces
+                            if iface.name == "org.freedesktop.login1.Session"
+                        ),
+                        None,
+                    )
+                    if session_interface:
+                        property_names = [p.name for p in session_interface.properties]
+                        for prop in property_names:
+                            getter = getattr(session_iface, f"get_{prop.lower()}", None)
+                            if getter:
+                                try:
+                                    props[prop] = await getter()
+                                except Exception as e:
+                                    props[prop] = f"[ERROR: {e}]"
+                            else:
+                                props[prop] = "[NO GETTER]"
+                    else:
+                        props = {
+                            "error": "Session interface not found in introspection"
+                        }
+                    # Run setup for already logged-in child
+                    logger.info(
+                        f"Startup: found active child session {session_id} for {username}"
+                    )
+                    self.handle_login(session_id, uid, username, props)
+                except Exception as e:
+                    logger.error(
+                        f"Error processing existing session {session_id} for {username}: {e}"
+                    )
 
         async def get_session_info(object_path):
             session_obj = bus.get_proxy_object(
@@ -310,9 +414,42 @@ class SessionTracker:
         except Exception:
             return str(uid)
 
+    def perform_daily_reset(self):
+        """
+        Perform daily reset: delete sessions since last reset and reset quotas if needed.
+        """
+        # Get last reset timestamp
+        last_reset = self.storage.get_last_reset_timestamp()
+        if last_reset is not None:
+            self.storage.delete_sessions_since(last_reset)
+        # Optionally, reset any in-memory quota tracking here
+        logger.info("Performed daily session reset.")
+
+    def get_active_users(self) -> list:
+        """
+        Return a list of currently active usernames.
+        """
+        return [session["username"] for session in self.active_sessions.values()]
+
+
+class GuardianDaemonInterface(ServiceInterface):
+    def __init__(self, session_tracker):
+        super().__init__("org.guardian.Daemon")
+        self.session_tracker = session_tracker
+
+    @method()
+    def LockEvent(self, session_id: str, username: str, locked: bool, timestamp: float):
+        """
+        Receives lock/unlock events from agents and forwards to SessionTracker.
+        """
+        logger.info(
+            f"Received LockEvent: session={session_id} user={username} locked={locked} ts={timestamp}"
+        )
+        self.session_tracker.receive_lock_event(session_id, username, locked, timestamp)
+        return None
+
 
 if __name__ == "__main__":
-
     # Load default configuration
     base_dir = os.path.dirname(os.path.abspath(__file__))
     default_config_path = os.path.join(base_dir, "../default-config.yaml")
@@ -325,7 +462,8 @@ if __name__ == "__main__":
             user_config = yaml.safe_load(f)
         if user_config:
             config.update(user_config)
-    policy = Policy(config_path)
+    # If config.yaml is missing, just use default config
+    policy = Policy(config_path if os.path.exists(config_path) else default_config_path)
     tracker = SessionTracker(policy, config)
     asyncio.run(tracker.run())
 # logind watcher

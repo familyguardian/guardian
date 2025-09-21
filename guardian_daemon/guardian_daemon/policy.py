@@ -30,8 +30,26 @@ class Policy:
         """
 
         env_path = os.environ.get("GUARDIAN_DAEMON_CONFIG")
-        self.config_path = Path(config_path or env_path or "config.yaml")
-
+        # Try config_path, then env_path, then default-config.yaml
+        config_candidates = [config_path, env_path, "config.yaml"]
+        config_candidates = [c for c in config_candidates if c]
+        config_file = None
+        for candidate in config_candidates:
+            candidate_path = Path(candidate)
+            if candidate_path.exists():
+                config_file = candidate_path
+                break
+        if not config_file:
+            # Fallback to default-config.yaml
+            default_path = Path(__file__).parent.parent / "default-config.yaml"
+            if default_path.exists():
+                config_file = default_path
+                logger.warning(f"Config file not found, using default: {default_path}")
+            else:
+                logger.error("No config.yaml or default-config.yaml found!")
+                self.data = {}
+                return
+        self.config_path = config_file
         logger.info(f"Loading policy from {self.config_path}")
         with open(self.config_path, "r") as f:
             self.data = yaml.safe_load(f)

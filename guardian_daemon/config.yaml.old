@@ -1,0 +1,54 @@
+# Beispiel für die Guardian-Konfiguration (config.yaml)
+# Diese Datei kann als Vorlage für die Policy genutzt werden.
+
+hub_address: ""  # Adresse des Guardian-Hub, leer = deaktiviert
+#db_path: "./guardian.sqlite"  # Pfad zur SQLite-Datenbank
+ipc_socket: "/run/guardian-daemon.sock"  # Pfad zum IPC-Socket
+
+# Zeitpunkt für den täglichen Reset des Tageskontingents (Format HH:MM, Standard: "03:00")
+reset_time: "03:00"
+timezone: "Europe/Berlin"
+
+notifications:
+  pre_quota_minutes: [15, 10, 5]  # Minuten vor Quota-Ende für Vorwarnungen
+  grace_period:
+    enabled: true
+    duration: 10                  # Dauer der Grace-Periode in Minuten
+    interval: 1                   # Benachrichtigungsintervall in Minuten während der Grace-Periode
+
+defaults:
+  # Maximale Nutzungszeit pro Tag in Minuten (Standard für alle Nutzer)
+  daily_quota_minutes: 90
+
+  # Zeitfenster, in denen Logins erlaubt sind (Curfew, Standard für alle Nutzer)
+  curfew:
+    weekdays: "08:00-20:00"   # Mo-Fr: Login nur zwischen 8 und 20 Uhr
+    saturday: "08:00-22:00"   # Sa: Login nur zwischen 8 und 22 Uhr
+    sunday: "09:00-20:00"     # So: Login nur zwischen 9 und 20 Uhr
+
+  # Minuten "Kulanzzeit" nach Erreichen des Tageslimits, bevor gesperrt wird
+  grace_minutes: 5
+
+  # Minuten Bonuszeit, die Eltern vergeben können (Standardwert)
+  bonus_pool_minutes: 0
+
+users:
+  # Individuelle Einstellungen pro Kind/Nutzer
+  kid1: {} # bekommt die Defaults
+
+  kid2:
+    # Tageskontingent für kid2 (Minuten)
+    daily_quota_minutes: 60
+    # Eigene Curfew-Zeiten für kid2
+    curfew:
+      weekdays: "07:30-19:30"
+      saturday: "08:00-21:00"
+      sunday: "09:00-19:00"
+    # Bonuszeit, die für kid2 vergeben werden kann
+    bonus_pool_minutes: 15
+
+# Weitere Optionen können ergänzt werden:
+# - allowlist: Liste erlaubter Programme/Apps (z.B. nur bestimmte Spiele oder Lernsoftware)
+# - grace_minutes: Zeit nach Quota-Überschreitung (siehe oben)
+# - timezone: Zeitzone pro Nutzer (falls abweichend von globaler Einstellung)
+# - ...

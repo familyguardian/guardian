@@ -20,7 +20,7 @@ follow_untyped_imports = true
 
 [tool.uv.workspace]
 members = ["*/"]
-exclude = ["scripts", "docs", "tests", "_site"]
+exclude = ["scripts", "docs", "tests", "_site", "systemd_units"]
 
 [dependency-groups]
 dev = [

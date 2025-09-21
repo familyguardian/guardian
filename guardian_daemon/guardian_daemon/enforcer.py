@@ -26,24 +26,88 @@ class Enforcer:
         """
         Checks quota and curfew for a user and enforces actions if necessary.
         """
-        # Quota enforcement
-        if not self.tracker.check_quota(username):
-            self.notify_user(username, "Quota reached! Your grace period begins.")
-            # TODO: Grace-minutes timer/countdown
-            # TODO: Notification before grace period ends
-            # After grace period:
-            self.terminate_session(username)
-            self.notify_user(username, "Your session will now be terminated.")
+        logger.info(f"Enforcing quota/curfew for user: {username}")
+        remaining_time = self.tracker.get_remaining_time(username)
+        total_time = self.tracker.get_total_time(username)
 
-        # Curfew enforcement (optional, e.g. via PAMManager)
-        # TODO: Curfew check and block login if necessary
+        if remaining_time <= 0:
+            logger.info(
+                f"User {username} has exceeded daily quota. Starting grace period."
+            )
+            self.notify_user(
+                username, "Time over! Grace period starts now.", category="critical"
+            )
+            self.handle_grace_period(username)
+            return
+
+        if remaining_time <= 60:
+            logger.info(f"User {username} has 1 minute left.")
+            self.notify_user(username, "1 minute left!", category="critical")
+        elif remaining_time <= 300:
+            logger.info(f"User {username} has 5 minutes left.")
+            self.notify_user(username, "5 minutes left!", category="warning")
+        elif remaining_time <= 600 and remaining_time < total_time / 2:
+            logger.info(f"User {username} has 10 minutes left.")
+            self.notify_user(username, "10 minutes left!", category="info")
+        elif remaining_time <= total_time / 2:
+            logger.info(f"User {username} has used 50% of their time.")
+            self.notify_user(username, "50% of your time is used.", category="info")
+
+    def handle_grace_period(self, username):
+        """
+        Handles the grace period by notifying the user every minute until time is up.
+        """
+        grace_time = self.policy.get_grace_time(username)
+        logger.info(f"Grace period for user {username}: {grace_time} minutes.")
+        while grace_time > 0:
+            self.notify_user(
+                username,
+                f"{grace_time} minutes of grace time left! Save your work.",
+                category="critical",
+            )
+            logger.info(f"User {username} grace time left: {grace_time} minutes.")
+            grace_time -= 1
+
+        self.terminate_session(username)
+        self.notify_user(
+            username, "Session terminated due to time over.", category="critical"
+        )
+        logger.info(f"User {username} session terminated after grace period.")
 
     def terminate_session(self, username):
         """
-        Terminates all running sessions of the user (e.g. via systemd or loginctl).
+        Terminates all running sessions of the user (via systemd loginctl).
         """
-        # TODO: Integration with systemd/loginctl
-        logger.warning(f"Terminating all sessions for {username}")
+        import subprocess
+
+        try:
+            # Get all sessions for the user
+            result = subprocess.run(
+                ["loginctl", "list-sessions", "--no-legend"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            sessions = []
+            for line in result.stdout.strip().split("\n"):
+                parts = line.split()
+                if len(parts) >= 3 and parts[2] == username:
+                    sessions.append(parts[0])
+            if not sessions:
+                logger.warning(f"No active sessions found for {username} to terminate.")
+                return
+            for session_id in sessions:
+                try:
+                    subprocess.run(
+                        ["loginctl", "terminate-session", session_id], check=True
+                    )
+                    logger.info(f"Terminated session {session_id} for user {username}.")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to terminate session {session_id} for user {username}: {e}"
+                    )
+        except Exception as e:
+            logger.error(f"Error terminating sessions for {username}: {e}")
 
     def notify_user(self, username, message, category="info"):
         """

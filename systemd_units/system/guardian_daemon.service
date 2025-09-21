@@ -1,0 +1,12 @@
+[Unit]
+Description=Guardian Daemon Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/uv run --frozen --directory /usr/local/guardian/guardian_daemon python3 -m guardian_daemon
+Environment=PYTHONPATH=/usr/local/guardian/guardian_daemon
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

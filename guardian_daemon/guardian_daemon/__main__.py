@@ -1,15 +1,18 @@
 import asyncio
+import datetime
 import hashlib
 import os
+import time
 
 import yaml
 
+from guardian_daemon.enforcer import Enforcer
 from guardian_daemon.logging import get_logger
-from guardian_daemon.pam_manager import PamManager
 from guardian_daemon.policy import Policy
 from guardian_daemon.sessions import SessionTracker
 from guardian_daemon.storage import Storage
 from guardian_daemon.systemd_manager import SystemdManager
+from guardian_daemon.user_manager import UserManager
 
 logger = get_logger("GuardianDaemon")
 
@@ -22,15 +25,15 @@ class GuardianDaemon:
 
     def __init__(self):
         """
-        Initializes Policy, Storage, PAM, Systemd, and SessionTracker.
+        Initializes Policy, Storage, UserManager, Systemd, SessionTracker, and Enforcer.
         Loads default-config.yaml first, then config.yaml and overwrites values.
         """
-        # Lade Default-Konfiguration
+        # Load Default Configuration
         with open(
             os.path.join(os.path.dirname(__file__), "../default-config.yaml"), "r"
         ) as f:
             config = yaml.safe_load(f)
-        # Überschreibe mit Werten aus config.yaml, falls vorhanden
+        # Overwrite with values from config.yaml, if available
         config_path = os.path.join(os.path.dirname(__file__), "../config.yaml")
         if os.path.exists(config_path):
             with open(config_path, "r") as f:
@@ -40,9 +43,10 @@ class GuardianDaemon:
         db_path = config.get("db_path", "guardian.sqlite")
         self.policy = Policy()
         self.storage = Storage(db_path)
-        self.pam = PamManager(self.policy)
+        self.pam = UserManager(self.policy)
         self.systemd = SystemdManager()
         self.tracker = SessionTracker(self.policy, config)
+        self.enforcer = Enforcer(self.policy, self.tracker)
         self.last_config = self._get_config_snapshot()
 
     def _get_config_snapshot(self):
@@ -56,7 +60,7 @@ class GuardianDaemon:
 
     async def periodic_reload(self):
         """
-        Checks every 5 minutes for config changes and updates timers/PAM rules.
+        Checks every 5 minutes for config changes and updates timers/UserManager rules.
         """
         while True:
             await asyncio.sleep(300)
@@ -64,8 +68,8 @@ class GuardianDaemon:
             self.policy.reload()
             new_snapshot = self._get_config_snapshot()
             if new_snapshot != old_snapshot:
-                logger.info("Config changed, updating timers and PAM rules.")
-                self.pam = PamManager(self.policy)
+                logger.info("Config changed, updating timers and UserManager rules.")
+                self.pam = UserManager(self.policy)
                 self.pam.write_time_rules()
                 reset_time = self.policy.data.get("reset_time", "03:00")
                 self.systemd.create_daily_reset_timer(reset_time)
@@ -77,12 +81,39 @@ class GuardianDaemon:
                 self.systemd.reload_systemd()
                 self.last_config = new_snapshot
 
+    async def enforce_users(self):
+        """
+        Periodically enforce policies for all users.
+        """
+        while True:
+            await asyncio.sleep(60)  # Check every minute
+            active_users = self.tracker.get_active_users()
+            for username in active_users:
+                self.enforcer.enforce_user(username)
+
     def check_and_recover_reset(self):
         """
         Checks at startup whether the last reset was executed and recovers it if necessary.
         """
-        # TODO: Implement logic, e.g. with timestamp in storage or lockfile
-        logger.info("Check if last reset needs to be recovered (Stub).")
+        # Use EPOCH timestamp in storage to track last reset
+        last_reset = self.storage.get_last_reset_timestamp()
+        today = datetime.date.today()
+        reset_time_str = self.policy.data.get("reset_time", "03:00")
+        reset_hour, reset_minute = map(int, reset_time_str.split(":"))
+        scheduled_reset = datetime.datetime.combine(
+            today, datetime.time(reset_hour, reset_minute)
+        )
+        scheduled_reset_epoch = scheduled_reset.timestamp()
+        now_epoch = time.time()
+        # If last reset was before today's scheduled reset and now is after scheduled reset, recover
+        if last_reset is None or (
+            last_reset < scheduled_reset_epoch and now_epoch > scheduled_reset_epoch
+        ):
+            logger.info("Missed daily reset detected. Performing recovery.")
+            self.tracker.perform_daily_reset()
+            self.storage.set_last_reset_timestamp(now_epoch)
+        else:
+            logger.info("Daily reset already performed or not needed.")
 
     async def run(self):
         """
@@ -94,16 +125,18 @@ class GuardianDaemon:
         # Curfew timer setup (example: use start/end from policy)
         curfew = self.policy.data.get("curfew", {})
         start_time = curfew.get("start", "22:00")
-        end_time = curfew.get("end", "06:00")
+        end_time = curfew.get("end", "09:00")
         self.systemd.create_curfew_timer(start_time, end_time)
         self.systemd.reload_systemd()
         self.check_and_recover_reset()
-        await asyncio.gather(self.tracker.run(), self.periodic_reload())
+        await asyncio.gather(
+            self.tracker.run(), self.periodic_reload(), self.enforce_users()
+        )
 
 
 def main():
     """
-    Entry Point für den Guardian-Daemon.
+    Entry Point for the Guardian-Daemon.
     """
     daemon = GuardianDaemon()
     asyncio.run(daemon.run())
