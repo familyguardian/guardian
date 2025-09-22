@@ -1,5 +1,15 @@
-
 # Guardian
+
+---
+
+> **WARNING: THIS SOFTWARE IS NOT READY FOR PRODUCTION OR REAL-WORLD USE!**
+>
+> Guardian is under active development. It is experimental, incomplete, and may contain serious bugs or security issues.
+> **DO NOT use this software to protect children, enforce limits, or for any purpose where safety, privacy, or**
+> **reliability matter.**
+> Use at your own risk. The maintainers do NOT recommend or support real-world deployment at this time.
+
+---
 
     Helping Families Build Healthy Media Habits
 

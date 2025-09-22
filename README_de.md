@@ -1,4 +1,16 @@
-# Guardian – Architektur- und Systemkonzept
+# Guardian
+
+---
+
+> **WARNUNG: DIESE SOFTWARE IST NICHT FÜR DEN PRODUKTIVEN EINSATZ ODER DEN ECHTEN GEBRAUCH GEEIGNET!**
+>
+> Guardian befindet sich in aktiver Entwicklung. Es ist experimentell, unvollständig und kann schwerwiegende Fehler oder
+> Sicherheitslücken enthalten.
+> **Bitte NICHT verwenden, um Kinder zu schützen, Grenzen durchzusetzen oder für irgendeinen Zweck, bei dem Sicherheit,**
+> **Privatsphäre oder Zuverlässigkeit wichtig sind.**
+> Nutzung auf eigene Gefahr. Die Entwickler empfehlen oder unterstützen den Einsatz im echten Leben derzeit NICHT.
+
+---
 
 ## Übersicht
 
