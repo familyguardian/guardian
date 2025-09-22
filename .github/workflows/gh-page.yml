@@ -23,7 +23,8 @@ jobs:
       - name: Install dependencies
         run: |
           pip install uv
-          uv sync --system --all-packages --all-groups
+          uv python install
+          uv sync --frozen --all-packages --all-groups
 
       - name: Deploy to GitHub Pages
         run: mkdocs gh-deploy --force -c -f mkdocs.yml
