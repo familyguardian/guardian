@@ -27,4 +27,4 @@ jobs:
           uv sync --frozen --all-packages --all-groups
 
       - name: Deploy to GitHub Pages
-        run: mkdocs gh-deploy --force -c -f mkdocs.yml
+        run: uv run mkdocs gh-deploy --force -c -f mkdocs.yml
