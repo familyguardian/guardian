@@ -94,8 +94,22 @@ class UserManager:
         """
         Ensure that the pam_time.so module is properly configured in PAM services.
         """
-        PAM_SERVICES = ["sddm", "login", "system-auth"]
+        # Core PAM services that need to be configured
+        PAM_SERVICES = [
+            "sddm",
+            "login",
+            "system-auth",
+            "password-auth",
+            "kde",
+            "lightdm",
+            "gdm",
+            "xdm",
+        ]
 
+        # Additional services to check for (but not create if they don't exist)
+        OPTIONAL_SERVICES = ["common-account", "common-auth", "common-session"]
+
+        # First handle core PAM services - create files if needed
         for service in PAM_SERVICES:
             service_file = Path(f"/etc/pam.d/{service}")
             if not service_file.exists():
@@ -135,6 +149,54 @@ class UserManager:
                         )
             except Exception as e:
                 logger.error(f"Failed to update PAM configuration for {service}: {e}")
+
+        # Now handle optional services - only modify if they already exist
+        for service in OPTIONAL_SERVICES:
+            service_file = Path(f"/etc/pam.d/{service}")
+            if not service_file.exists():
+                logger.debug(
+                    f"Optional PAM service file {service} does not exist, skipping"
+                )
+                continue
+
+            try:
+                with open(service_file, "r") as f:
+                    content = f.read()
+
+                if "pam_time.so" not in content:
+                    # Make a backup of the original file
+                    backup_file = service_file.with_suffix(f".bak-{int(time.time())}")
+                    shutil.copy(service_file, backup_file)
+
+                    # For optional files, just append to end if we can't find account section
+                    lines = content.split("\n")
+                    account_section = [
+                        i
+                        for i, line in enumerate(lines)
+                        if line.strip().startswith("account")
+                        and not line.strip().startswith("#")
+                    ]
+
+                    if account_section:
+                        # Insert after the last account line
+                        insert_pos = max(account_section) + 1
+                        lines.insert(insert_pos, "account    required    pam_time.so")
+                    else:
+                        # Just append to the end
+                        lines.append("# Added by guardian-daemon")
+                        lines.append("account    required    pam_time.so")
+
+                    # Write the updated file
+                    with open(service_file, "w") as f:
+                        f.write("\n".join(lines))
+
+                    logger.info(
+                        f"Added pam_time.so module to optional service {service_file}"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Failed to update optional PAM configuration for {service}: {e}"
+                )
 
         logger.info("PAM time module configuration checked")
 
@@ -234,6 +296,23 @@ class UserManager:
                     f.write(line + "\n")
             os.chmod(TIME_CONF_PATH, 0o644)
             logger.info(f"Wrote {len(rules)} managed rules to {TIME_CONF_PATH}")
+
+            # Reload PAM configuration if the system supports it
+            try:
+                # Check if systemd-reload-pam exists
+                result = subprocess.run(
+                    ["which", "systemd-reload-pam"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+
+                if result.returncode == 0:
+                    subprocess.run(["systemd-reload-pam"], check=True)
+                    logger.info("Reloaded PAM configuration")
+            except Exception as e:
+                logger.warning(f"Could not reload PAM configuration: {e}")
+
         except Exception as e:
             logger.error(f"Failed to write to {TIME_CONF_PATH}: {e}")
 
@@ -243,15 +322,35 @@ class UserManager:
         """
         rules = []
         users = self.policy.data.get("users", {})
+
+        # List of services to protect with time rules
+        services = ["login", "sddm", "gdm", "lightdm", "xdm", "kde"]
+
         for username, user_policy in users.items():
             curfew = user_policy.get("curfew", self.policy.get_default("curfew"))
             # Beispiel: weekdays: "08:00-20:00"
             if curfew:
-                for day, times in curfew.items():
-                    # PAM time.conf syntax: <service>;<ttys>;<users>;<day>;<start>-<end>
-                    # Allow login during allowed hours, for multiple services
-                    for service in ["login", "sddm", "gdm", "lightdm", "xdm", "kde"]:
-                        rules.append(f"{service};*;{username};{day};{times}")
+                # 1. First, add EXPLICIT DENY rules using negation - these are stronger
+
+                # Map day strings to standard formats
+                day_mapping = {
+                    "weekdays": "Mo|Tu|We|Th|Fr",
+                    "saturday": "Sa",
+                    "sunday": "Su",
+                    "all": "Al",
+                }
+
+                # For each service, create comprehensive rules
+                for service in services:
+                    for day, times in curfew.items():
+                        # First, allow during allowed hours
+                        standard_day = day_mapping.get(day, day)
+                        rules.append(f"{service};*;{username};{standard_day};{times}")
+
+                        # Then explicitly deny outside those hours on the same days
+                        # This negation pattern is important: !times means EXCEPT during times
+                        rules.append(f"{service};*;{username};{standard_day};!{times}")
+
         logger.debug(f"Generated {len(rules)} PAM time rules.")
         return rules
 
