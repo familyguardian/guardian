@@ -207,34 +207,117 @@ class UserManager:
                             custom_profile_path = Path(
                                 f"/etc/authselect/custom/{guardian_profile_name}"
                             )
+                            local_profile_path = Path("/etc/authselect/local")
 
-                            # Check if our custom profile already exists
-                            if custom_profile_path.exists():
-                                logger.info(
-                                    f"Custom profile {guardian_profile_name} already exists"
-                                )
-                            else:
-                                # Create the custom profile
-                                try:
+                            # Create/recreate the custom profile to stay in sync with Local profile
+                            try:
+                                # First, check if we need to recreate the profile to sync with Local
+                                need_recreation = False
+
+                                # If the profile doesn't exist, we definitely need to create it
+                                if not custom_profile_path.exists():
+                                    need_recreation = True
+                                    logger.info(
+                                        f"Custom profile {guardian_profile_name} doesn't exist, will create it"
+                                    )
+                                else:
+                                    # Check if Local profile has been updated by comparing files
+                                    logger.info(
+                                        "Checking if Local profile has been updated..."
+                                    )
+
+                                    # Check for differences in key files
+                                    for service in AUTHSELECT_SERVICES:
+                                        local_file = local_profile_path / service
+                                        custom_file = custom_profile_path / service
+
+                                        if not local_file.exists():
+                                            continue
+
+                                        if not custom_file.exists():
+                                            need_recreation = True
+                                            break
+
+                                        # Compare files excluding our pam_time.so line
+                                        try:
+                                            with open(local_file, "r") as f:
+                                                local_content = f.read()
+
+                                            with open(custom_file, "r") as f:
+                                                custom_content = f.read()
+
+                                            # Remove any pam_time.so lines from the custom content for comparison
+                                            custom_lines = custom_content.split("\n")
+                                            custom_lines = [
+                                                line
+                                                for line in custom_lines
+                                                if "pam_time.so" not in line
+                                            ]
+                                            filtered_custom_content = "\n".join(
+                                                custom_lines
+                                            )
+
+                                            # If the content is different, we need to recreate
+                                            if (
+                                                local_content.strip()
+                                                != filtered_custom_content.strip()
+                                            ):
+                                                need_recreation = True
+                                                logger.info(
+                                                    f"Local profile {service} has changed, will recreate guardian-local"
+                                                )
+                                                break
+                                        except Exception as e:
+                                            logger.warning(
+                                                f"Error comparing profile files: {e}"
+                                            )
+                                            # Be safe and recreate if comparison fails
+                                            need_recreation = True
+                                            break
+
+                                if need_recreation:
+                                    # Backup any existing custom profile
+                                    if custom_profile_path.exists():
+                                        backup_path = Path(
+                                            f"/etc/authselect/custom/{guardian_profile_name}.bak-{int(time.time())}"
+                                        )
+                                        try:
+                                            shutil.copytree(
+                                                custom_profile_path, backup_path
+                                            )
+                                            logger.info(
+                                                f"Backed up existing profile to {backup_path}"
+                                            )
+                                        except Exception as e:
+                                            logger.warning(
+                                                f"Failed to backup existing profile: {e}"
+                                            )
+
+                                    # Force recreation
                                     subprocess.run(
                                         [
                                             "authselect",
                                             "create-profile",
                                             guardian_profile_name,
                                             "--base-on=local",
+                                            "--force",
                                         ],
                                         check=True,
                                         capture_output=True,
                                         text=True,
                                     )
                                     logger.info(
-                                        f"Created custom profile {guardian_profile_name} based on local profile"
+                                        f"Created/updated custom profile {guardian_profile_name} based on current local profile"
                                     )
-                                except subprocess.CalledProcessError as e:
-                                    logger.error(
-                                        f"Failed to create custom profile: {e.stderr}"
+                                else:
+                                    logger.info(
+                                        f"Custom profile {guardian_profile_name} exists and is up to date with Local profile"
                                     )
-                                    raise
+                            except subprocess.CalledProcessError as e:
+                                logger.error(
+                                    f"Failed to create custom profile: {e.stderr}"
+                                )
+                                raise
 
                             # Modify the profile files to add pam_time.so
                             for service in AUTHSELECT_SERVICES:
