@@ -54,7 +54,7 @@ def create_guardian_user():
     except subprocess.CalledProcessError:
         log("Creating guardian user...")
         subprocess.run(
-            ["useradd", "-r", "-s", "/usr/sbin/nologin", "guardian"], check=True
+            ["useradd", "-m", "-r", "-s", "/usr/sbin/nologin", "guardian"], check=True
         )
         subprocess.run(["usermod", "-aG", "users", "guardian"], check=True)
 
