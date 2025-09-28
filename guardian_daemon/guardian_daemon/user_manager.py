@@ -289,26 +289,75 @@ class UserManager:
                                             f"Appended pam_time.so to custom profile {service}"
                                         )
 
-                            # Select the custom profile
+                                        # Select the custom profile
                             try:
                                 # Get current features if any
                                 current_features = []
                                 try:
-                                    profile_info = subprocess.run(
-                                        ["authselect", "current", "--raw"],
+                                    # Try getting the features with the more reliable "current" command
+                                    result = subprocess.run(
+                                        ["authselect", "current"],
                                         check=True,
                                         capture_output=True,
                                         text=True,
-                                    ).stdout.strip()
-
-                                    if "with-" in profile_info:
-                                        for line in profile_info.split("\n"):
-                                            if line.strip().startswith("with-"):
-                                                current_features.append(line.strip())
-                                except Exception:
-                                    logger.warning(
-                                        "Could not determine current authselect features"
                                     )
+
+                                    # Parse the output which is in a more human-readable format
+                                    lines = result.stdout.strip().split("\n")
+                                    feature_section = False
+
+                                    for line in lines:
+                                        # Skip the first line which is the profile ID
+                                        if (
+                                            "Profil ID:" in line
+                                            or "Profile ID:" in line
+                                        ):
+                                            continue
+
+                                        # Detect the feature section header
+                                        if (
+                                            "Aktivierte Funktionen:" in line
+                                            or "Enabled features:" in line
+                                        ):
+                                            feature_section = True
+                                            continue
+
+                                        # Once in the feature section, collect features
+                                        if (
+                                            feature_section
+                                            and line.strip()
+                                            and "- " in line
+                                        ):
+                                            feature = line.strip().replace("- ", "")
+                                            if feature:
+                                                current_features.append(feature)
+
+                                    logger.info(
+                                        f"Detected features to preserve: {current_features}"
+                                    )
+                                except Exception as e:
+                                    # Fallback to the raw method
+                                    logger.warning(
+                                        f"Failed to get features from current command: {e}"
+                                    )
+                                    try:
+                                        profile_info = subprocess.run(
+                                            ["authselect", "current", "--raw"],
+                                            check=True,
+                                            capture_output=True,
+                                            text=True,
+                                        ).stdout.strip()
+
+                                        if "with-" in profile_info:
+                                            for line in profile_info.split("\n"):
+                                                if line.strip().startswith("with-"):
+                                                    current_features.append(
+                                                        line.strip()
+                                                    )
+                                    except Exception:
+                                        logger.warning(
+                                            "Could not determine current authselect features"
+                                        )
 
                                 # Select our custom profile with the same features as the current profile
                                 cmd = [
@@ -317,6 +366,10 @@ class UserManager:
                                     f"custom/{guardian_profile_name}",
                                 ]
                                 if current_features:
+                                    # Log the features we're preserving
+                                    logger.info(
+                                        f"Preserving features: {', '.join(current_features)}"
+                                    )
                                     cmd.extend(current_features)
                                 cmd.append("--force")
 
@@ -324,7 +377,7 @@ class UserManager:
                                     cmd, check=True, capture_output=True, text=True
                                 )
                                 logger.info(
-                                    f"Selected custom profile {guardian_profile_name} with pam_time.so"
+                                    f"Selected custom profile {guardian_profile_name} with pam_time.so and preserved features"
                                 )
                             except subprocess.CalledProcessError as e:
                                 logger.error(
