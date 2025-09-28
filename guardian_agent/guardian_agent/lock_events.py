@@ -16,15 +16,36 @@ class LockEventReporter:
         self.username = username
         self.system_bus = system_bus
         self.session_bus = session_bus
+        self._last_lock_state = None
+        self._last_event_time = 0
+        self._deduplication_window = 2  # seconds
         logger.info(
             f"LockEventReporter initialized: system_bus={getattr(self.system_bus, 'unique_name', repr(self.system_bus))}, session_bus={getattr(self.session_bus, 'unique_name', repr(self.session_bus))}"
         )
 
     async def send_lock_event(self, locked: bool):
         """
-        Send lock/unlock event to daemon via D-Bus IPC.
+        Send lock/unlock event to daemon via D-Bus IPC, with deduplication.
+        Ignores systemd-user sessions.
         """
         timestamp = time.time()  # EPOCH timestamp
+        # Deduplication: Only send if state changed or enough time passed
+        if (
+            self._last_lock_state == locked
+            and (timestamp - self._last_event_time) < self._deduplication_window
+        ):
+            logger.debug(
+                f"Deduplicated lock event: locked={locked}, last_state={self._last_lock_state}, last_time={self._last_event_time}"
+            )
+            return
+        self._last_lock_state = locked
+        self._last_event_time = timestamp
+        # Check for systemd-user session and skip
+        if hasattr(self, "service") and self.service == "systemd-user":
+            logger.info(
+                f"Ignoring lock event for systemd-user session: {self.session_id}"
+            )
+            return
         try:
             logger.debug(
                 f"Attempting to send lock event: system_bus unique_name={getattr(self.system_bus, 'unique_name', None)}, session_id={self.session_id}, username={self.username}, locked={locked}, timestamp={timestamp}"

@@ -1,10 +1,7 @@
 import asyncio
-import fcntl
 import getpass
 import os
-import subprocess
 
-import psutil
 from dbus_next.aio import MessageBus
 from dbus_next.service import ServiceInterface, method
 
@@ -54,8 +51,9 @@ class GuardianAgentInterface(ServiceInterface):
             },
         }
         cat = categories.get(category, categories["info"])
-        subprocess.run(
-            [
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
                 "notify-send",
                 "-a",
                 "Guardian",
@@ -66,8 +64,20 @@ class GuardianAgentInterface(ServiceInterface):
                 "-t",
                 cat["expire"],
                 message,
-            ]
-        )
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+
+            if proc.returncode != 0:
+                logger.error(
+                    f"notify-send failed with code {proc.returncode}: {stderr.decode().strip()}"
+                )
+        except FileNotFoundError:
+            logger.error("`notify-send` command not found. Please install it.")
+        except Exception as e:
+            logger.error(f"An error occurred while sending notification: {e}")
+
         return ""
 
 
@@ -77,79 +87,59 @@ async def main():
     """
     from dbus_next.constants import BusType
 
-    # Create both system and session (user) bus connections
-    system_bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-    session_bus = await MessageBus(bus_type=BusType.SESSION).connect()
+    # A single agent process should run per user session.
+    # We use a lock file to ensure this.
     username = getpass.getuser()
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    lock_path = os.path.join(runtime_dir, "guardian_agent.lock")
 
-    obj_path = os.environ.get("GUARDIAN_AGENT_PATH")
-    if not obj_path:
-        lock_path = os.path.expanduser("~/.cache/guardian_agent_lock.txt")
-        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-        session_num = None
-        with open(lock_path, "a+") as lock_file:
-            valid_lines = []
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-            lock_file.seek(0)
-            lines = lock_file.readlines()
-            used = set()
-            for line in lines:
-                parts = line.strip().split()
-                if len(parts) == 2:
-                    pid = int(parts[1])
-                    if psutil.pid_exists(pid):
-                        used.add(int(parts[0]))
-                        valid_lines.append(line)
-            lock_file.seek(0)
-            lock_file.truncate()
-            for line in valid_lines:
-                lock_file.write(line)
-            for n in range(1, 100):
-                if n not in used:
-                    session_num = n
-                    break
-            lock_file.write(f"{session_num} {os.getpid()}\n")
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
-        if session_num == 1:
-            obj_path = "/org/guardian/Agent"
-        else:
-            obj_path = f"/org/guardian/Agent{session_num}"
+    os.makedirs(runtime_dir, exist_ok=True)
+    lock_file = open(lock_path, "w")
+    try:
+        import fcntl
 
-    # Create all D-Bus sessions/interfaces at startup
-    interface = GuardianAgentInterface(username)
-    system_bus.export(obj_path, interface)
-    # Request the well-known name so daemon can reach us
-    await system_bus.request_name("org.guardian.Agent")
-    logger.info(
-        f"Guardian Agent listening for notifications for user: {username} on {obj_path} (name org.guardian.Agent)"
-    )
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (IOError, ImportError):
+        logger.error("Another instance of Guardian Agent is already running. Exiting.")
+        return
 
-    # Pass both buses to LockEventReporter and any other D-Bus components
-    lock_reporter = LockEventReporter(
-        obj_path, username, system_bus=system_bus, session_bus=session_bus
-    )
-    asyncio.create_task(lock_reporter.run())
+    # Create a unique bus name for this agent instance
+    pid = os.getpid()
+    bus_name = f"org.guardian.Agent.{username}.pid{pid}"
 
-    # Future: add other D-Bus services here and pass buses
+    logger.info(f"Guardian Agent starting up, PID: {pid}, User: {username}")
+    logger.info(f"Requesting D-Bus name: {bus_name}")
 
     try:
+        agent_iface = GuardianAgentInterface(username)
+        # Get the system bus
+        system_bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        await system_bus.request_name(bus_name)
+        system_bus.export("/org/guardian/Agent", agent_iface)
+
+        # Also get the session bus for screen lock events
+        session_bus = await MessageBus(bus_type=BusType.SESSION).connect()
+
+        # Pass both buses to LockEventReporter and any other D-Bus components
+        lock_reporter = LockEventReporter(
+            "/org/guardian/Agent",
+            username,
+            system_bus=system_bus,
+            session_bus=session_bus,
+        )
+        asyncio.create_task(lock_reporter.run())
+
         await asyncio.Future()  # run forever
     finally:
-        lock_path = os.path.expanduser("~/.cache/guardian_agent_lock.txt")
+        # Release the lock and clean up the file on exit.
+        import fcntl
+
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
         try:
-            os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-            with open(lock_path, "r+") as lock_file:
-                fcntl.flock(lock_file, fcntl.LOCK_EX)
-                lines = lock_file.readlines()
-                lock_file.seek(0)
-                lock_file.truncate()
-                for line in lines:
-                    parts = line.strip().split()
-                    if len(parts) == 2 and int(parts[1]) != os.getpid():
-                        lock_file.write(line)
-                fcntl.flock(lock_file, fcntl.LOCK_UN)
-        except Exception as e:
-            logger.error(f"[AGENT LOCK CLEANUP ERROR] {e}")
+            os.remove(lock_path)
+        except OSError as e:
+            logger.error(f"Error removing lock file: {e}")
 
 
 if __name__ == "__main__":

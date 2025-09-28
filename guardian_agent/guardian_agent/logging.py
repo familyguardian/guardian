@@ -60,6 +60,12 @@ def setup_logging():
     )
 
 
+_logging_configured = False
+
+
 def get_logger(name):
-    setup_logging()
+    global _logging_configured
+    if not _logging_configured:
+        setup_logging()
+        _logging_configured = True
     return structlog.get_logger(name)

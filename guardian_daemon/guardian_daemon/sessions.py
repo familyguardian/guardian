@@ -18,6 +18,7 @@ from dbus_next.service import ServiceInterface, method
 from guardian_daemon.logging import get_logger
 from guardian_daemon.policy import Policy
 from guardian_daemon.storage import Storage
+from guardian_daemon.user_manager import UserManager
 
 logger = get_logger("SessionTracker")
 
@@ -60,7 +61,15 @@ class SessionTracker:
         from dbus_next.constants import BusType
 
         bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-        names = await bus.list_names()
+        # Use the standard D-Bus interface to list names
+        introspection = await bus.introspect(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus"
+        )
+        obj = bus.get_proxy_object(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", introspection
+        )
+        iface = obj.get_interface("org.freedesktop.DBus")
+        names = await iface.call_list_names()
         # Filter for agent prefix and username
         return [
             name
@@ -98,36 +107,46 @@ class SessionTracker:
             if session["username"] == username
         ]
 
-    def get_total_time(self, username: str) -> float:
+    async def _calculate_used_time(self, username: str) -> float:
         """
-        Returns the total usage time (in minutes) for the given user today.
+        Calculates the total used time for a user since the last reset.
+        This is an internal method and should be called within a lock.
         """
-        reset_time = self.policy.data.get("reset_time", "03:00")
-        now = datetime.datetime.now(datetime.timezone.utc).astimezone()
-        reset_hour, reset_minute = map(int, reset_time.split(":"))
-        today_reset = now.replace(
-            hour=reset_hour, minute=reset_minute, second=0, microsecond=0
-        )
-        if now < today_reset:
-            last_reset = today_reset - datetime.timedelta(days=1)
-        else:
-            last_reset = today_reset
+        async with self.session_lock:
+            # First, calculate time for currently active sessions for the user
+            active_duration_seconds = 0
+            now = time.time()
+            for session in self.active_sessions.values():
+                if session["username"] == username:
+                    active_duration_seconds += now - session["start_time"]
 
-        sessions = self.storage.get_sessions_for_user(
-            username, since=last_reset.timestamp()
-        )
-        filtered_sessions = [
-            s for s in sessions if s[6] > 30 and s[8] != "systemd-user"
-        ]  # s[6] = duration (seconds), s[8] = service
-        total_minutes = sum((s[6] for s in filtered_sessions)) / 60
-        for session in self.active_sessions.values():
-            if session["username"] == username:
-                total_minutes += (time.time() - session["start_time"]) / 60
-        return total_minutes
+            # Then, add the duration of already completed sessions from the database
+            reset_time = self.policy.data.get("reset_time", "03:00")
+            now_dt = datetime.datetime.now(datetime.timezone.utc).astimezone()
+            reset_hour, reset_minute = map(int, reset_time.split(":"))
+            today_reset = now_dt.replace(
+                hour=reset_hour, minute=reset_minute, second=0, microsecond=0
+            )
+            if now_dt < today_reset:
+                last_reset = today_reset - datetime.timedelta(days=1)
+            else:
+                last_reset = today_reset
 
-    def get_remaining_time(self, username: str) -> float:
+            db_sessions = self.storage.get_sessions_for_user(
+                username, since=last_reset.timestamp()
+            )
+            # Filter: Only sessions with meaningful duration and not systemd-user sessions
+            filtered_sessions = [
+                s for s in db_sessions if s[6] > 30 and s[8] != "systemd-user"
+            ]
+            db_duration_seconds = sum(s[6] for s in filtered_sessions)
+
+            total_seconds = active_duration_seconds + db_duration_seconds
+            return total_seconds / 60
+
+    async def get_total_time(self, username: str) -> float:
         """
-        Returns the remaining allowed time (in minutes) for the given user today.
+        Returns the total allowed time (in minutes) for the given user today.
         """
         user_policy = self.policy.get_user_policy(username)
         if user_policy is None:
@@ -135,62 +154,49 @@ class SessionTracker:
         quota = user_policy.get("daily_quota_minutes")
         if quota is None:
             quota = self.policy.get_default("daily_quota_minutes")
+        return float(quota)
 
-        reset_time = self.policy.data.get("reset_time", "03:00")
-        now = datetime.datetime.now(datetime.timezone.utc).astimezone()
-        reset_hour, reset_minute = map(int, reset_time.split(":"))
-        today_reset = now.replace(
-            hour=reset_hour, minute=reset_minute, second=0, microsecond=0
-        )
-        if now < today_reset:
-            last_reset = today_reset - datetime.timedelta(days=1)
-        else:
-            last_reset = today_reset
+    async def get_remaining_time(self, username: str) -> float:
+        """
+        Returns the remaining allowed time (in minutes) for the given user today.
+        """
+        total_allowed = await self.get_total_time(username)
+        if total_allowed == float("inf"):
+            return float("inf")
 
-        sessions = self.storage.get_sessions_for_user(
-            username, since=last_reset.timestamp()
-        )
-        filtered_sessions = [
-            s for s in sessions if s[6] > 30 and s[8] != "systemd-user"
-        ]  # s[6] = duration (seconds), s[8] = service
-        total_minutes = sum((s[6] for s in filtered_sessions)) / 60
-        for session in self.active_sessions.values():
-            if session["username"] == username:
-                total_minutes += (time.time() - session["start_time"]) / 60
-        remaining = quota - total_minutes
+        used_minutes = await self._calculate_used_time(username)
+        remaining = total_allowed - used_minutes
         return max(0, remaining)
 
-    def receive_lock_event(
+    async def receive_lock_event(
         self, session_id: str, username: str, locked: bool, timestamp: float
     ):
         """
         Called via D-Bus/IPC from agent to record lock/unlock events for a session.
         Also updates session progress in the database.
         """
-        if session_id not in self.active_sessions:
-            logger.warning(f"Lock event for unknown session: {session_id}")
-            return
-        if session_id not in self.session_locks:
-            self.session_locks[session_id] = []
-        if locked:
-            # Lock started
-            self.session_locks[session_id].append((timestamp, None))
-            logger.debug(f"Session {session_id}: screen locked at {timestamp}")
-        else:
-            # Lock ended
-            # Find last open lock period
-            for i in range(len(self.session_locks[session_id]) - 1, -1, -1):
-                lock_start, lock_end = self.session_locks[session_id][i]
-                if lock_end is None:
-                    self.session_locks[session_id][i] = (lock_start, timestamp)
-                    logger.debug(
-                        f"Session {session_id}: screen unlocked at {timestamp}"
-                    )
-                    break
-        # Update session progress in DB after lock event
-        now = time.time()
-        duration = now - self.active_sessions[session_id]["start_time"]
-        self.storage.update_session_progress(session_id, duration)
+        async with self.session_lock:
+            if session_id not in self.active_sessions:
+                logger.warning(f"Lock event for unknown session: {session_id}")
+                return
+            if session_id not in self.session_locks:
+                self.session_locks[session_id] = []
+            if locked:
+                # Lock started
+                self.session_locks[session_id].append((timestamp, None))
+                logger.debug(f"Session {session_id}: screen locked at {timestamp}")
+            else:
+                # Lock ended
+                # Find last open lock period
+                for i in range(len(self.session_locks[session_id]) - 1, -1, -1):
+                    lock_start, lock_end = self.session_locks[session_id][i]
+                    if lock_end is None:
+                        self.session_locks[session_id][i] = (lock_start, timestamp)
+                        logger.debug(
+                            f"Session {session_id}: screen unlocked at {timestamp}"
+                        )
+                        break
+            # No longer updating DB here; periodic task handles it.
 
     async def periodic_session_update(self, interval: int = 60):
         """
@@ -198,24 +204,28 @@ class SessionTracker:
         """
         while True:
             now = time.time()
-            for session_id, session in self.active_sessions.items():
-                duration = now - session["start_time"]
-                self.storage.update_session_progress(session_id, duration)
+            async with self.session_lock:
+                for session_id, session in self.active_sessions.items():
+                    duration = now - session["start_time"]
+                    self.storage.update_session_progress(session_id, duration)
             await asyncio.sleep(interval)
 
-    def __init__(self, policy: Policy, config: dict):
+    def __init__(self, policy: Policy, config: dict, user_manager: UserManager):
         """
         Initialize the SessionTracker with a policy and configuration.
 
         Args:
             policy (Policy): Policy instance
             config (dict): Parsed configuration
+            user_manager (UserManager): An instance of the user manager.
         """
         self.policy = policy
+        self.user_manager = user_manager
         db_path = config.get("db_path", "guardian.sqlite")
         self.storage = Storage(db_path)
         self.active_sessions: dict[str, dict] = {}
         self.session_locks: dict[str, list[tuple[float, float | None]]] = {}
+        self.session_lock = asyncio.Lock()
 
         # Restore active sessions from database (sessions with no end_time)
         self._restore_active_sessions()
@@ -223,30 +233,40 @@ class SessionTracker:
     def _restore_active_sessions(self):
         """
         Restore sessions that are still open (no end_time) from the database into active_sessions.
+        The start_time is reset to now to avoid counting offline time.
         """
         c = self.storage.conn.cursor()
         c.execute(
             "SELECT session_id, username, uid, start_time, desktop, service FROM sessions WHERE end_time IS NULL OR end_time = 0"
         )
         rows = c.fetchall()
+        now = time.time()
         for row in rows:
-            session_id, username, uid, start_time, desktop, service = row
+            session_id, username, uid, old_start_time, desktop, service = row
+            # The session was active before a restart. Reset start_time to now
+            # to ensure we only count time from when the daemon is actually running.
+            # The time before the restart is already persisted by periodic_session_update.
             self.active_sessions[session_id] = {
                 "uid": uid,
                 "username": username,
-                "start_time": start_time,
+                "start_time": now,
                 "desktop": desktop,
                 "service": service,
             }
             self.session_locks[session_id] = []
+            logger.info(
+                f"Restored session {session_id} for {username}. Original start: {old_start_time}, new effective start: {now}"
+            )
+
         if rows:
             logger.info(
                 f"Restored {len(rows)} active sessions from database on startup."
             )
 
-    def handle_login(self, session_id, uid, username, props):
+    async def handle_login(self, session_id, uid, username, props):
         """
         Register a new session on login for child accounts.
+        Skips systemd-user sessions.
         Also ensure user account is set up: PAM time rules, systemd user service, and agent.
 
         Args:
@@ -260,34 +280,40 @@ class SessionTracker:
                 f"Ignoring session from {username} (UID {uid}) Session {session_id}"
             )
             return
-        self.active_sessions[session_id] = {
-            "uid": uid,
-            "username": username,
-            "start_time": time.time(),  # UNIX epoch
-        }
-        self.session_locks[session_id] = []
+        desktop = props.get("Desktop", None)
+        service = props.get("Service", None)
+        if service == "systemd-user":
+            logger.info(
+                f"Ignoring systemd-user session: {session_id} for user {username}"
+            )
+            return
+
+        async with self.session_lock:
+            self.active_sessions[session_id] = {
+                "uid": uid,
+                "username": username,
+                "start_time": time.time(),  # UNIX epoch
+                "desktop": desktop,
+                "service": service,
+            }
+            self.session_locks[session_id] = []
 
         # Ensure user account setup
-        from guardian_daemon.user_manager import UserManager
-
-        user_manager = UserManager(self.policy)
-        user_manager.write_time_rules()
-        user_manager.setup_user_service(username)
-        user_manager.ensure_systemd_user_service(username)
+        self.user_manager.write_time_rules()
+        self.user_manager.setup_user_service(username)
+        self.user_manager.ensure_systemd_user_service(username)
 
         # Optionally start agent for user (if not managed by systemd)
         # os.system(f"runuser -l {username} -c 'guardian_agent &'")
 
-        # Debug output of all info before writing
-        desktop = props.get("Desktop", None)
-        service = props.get("Service", None)
-
         # Create session entry with end_time and duration=0
+        async with self.session_lock:
+            start_time = self.active_sessions[session_id]["start_time"]
         self.storage.add_session(
             session_id,
             username,
             uid,
-            self.active_sessions[session_id]["start_time"],
+            start_time,
             0.0,
             0.0,
             desktop,
@@ -295,15 +321,16 @@ class SessionTracker:
         )
         logger.info(f"Login: {username} (UID {uid}) Session {session_id}")
 
-    def handle_logout(self, session_id):
+    async def handle_logout(self, session_id):
         """
         End a session on logout and save it in the database for child accounts.
 
         Args:
             session_id (str): Session ID
         """
-        session = self.active_sessions.pop(session_id, None)
-        lock_periods = self.session_locks.pop(session_id, [])
+        async with self.session_lock:
+            session = self.active_sessions.pop(session_id, None)
+            lock_periods = self.session_locks.pop(session_id, [])
         if session:
             kids = set(self.policy.data.get("users", {}).keys())
             if session["username"] not in kids:
@@ -335,7 +362,7 @@ class SessionTracker:
                 f"Logout: {session['username']} Session {session_id} Duration: {effective_duration:.1f}s (locked: {locked_time:.1f}s)"
             )
 
-    def check_quota(self, username: str) -> bool:
+    async def check_quota(self, username: str) -> bool:
         """
         Sum all sessions since the last reset and check against the daily quota.
         Returns True if time remains, otherwise False.
@@ -348,36 +375,12 @@ class SessionTracker:
         """
         user_policy = self.policy.get_user_policy(username)
         if user_policy is None:
-            return True  # Nutzer wird nicht überwacht
-        quota = user_policy.get("daily_quota_minutes")
-        if quota is None:
-            quota = self.policy.get_default("daily_quota_minutes")
+            return True  # User is not monitored
 
-        reset_time = self.policy.data.get("reset_time", "03:00")
-        now = datetime.datetime.now(datetime.timezone.utc).astimezone()
-        reset_hour, reset_minute = map(int, reset_time.split(":"))
-        today_reset = now.replace(
-            hour=reset_hour, minute=reset_minute, second=0, microsecond=0
-        )
-        if now < today_reset:
-            last_reset = today_reset - datetime.timedelta(days=1)
-        else:
-            last_reset = today_reset
+        total_allowed = await self.get_total_time(username)
+        used_time = await self._calculate_used_time(username)
 
-        sessions = self.storage.get_sessions_for_user(
-            username, since=last_reset.timestamp()
-        )
-        # Filter: Only sessions with meaningful duration (> 0.5 min) and optionally no SDDM/service logins
-        filtered_sessions = [
-            s for s in sessions if s[6] > 30
-        ]  # s[6] = duration (seconds), >30s
-        total_minutes = sum((s[6] for s in filtered_sessions)) / 60
-
-        for session in self.active_sessions.values():
-            if session["username"] == username:
-                total_minutes += (time.time() - session["start_time"]) / 60
-
-        return total_minutes < quota
+        return used_time < total_allowed
 
     async def run(self):
         """
@@ -442,7 +445,7 @@ class SessionTracker:
                     logger.info(
                         f"Startup: found active child session {session_id} for {username}"
                     )
-                    self.handle_login(session_id, uid, username, props)
+                    await self.handle_login(session_id, uid, username, props)
                 except Exception as e:
                     logger.error(
                         f"Error processing existing session {session_id} for {username}: {e}"
@@ -499,12 +502,12 @@ class SessionTracker:
                 logger.debug(
                     f"Extracted: Name={username}, UID={uid}, Desktop={props.get('Desktop')}, Service={props.get('Service')}"
                 )
-                self.handle_login(session_id, uid, username, props)
+                await self.handle_login(session_id, uid, username, props)
 
             asyncio.create_task(inner())
 
         def session_removed_handler(session_id, object_path):
-            self.handle_logout(session_id)
+            asyncio.create_task(self.handle_logout(session_id))
 
         manager.on_session_new(session_new_handler)
         manager.on_session_removed(session_removed_handler)
@@ -516,7 +519,7 @@ class SessionTracker:
         while True:
             await asyncio.sleep(3600)
 
-    def _get_username(self, uid):
+    async def _get_username(self, uid):
         """
         Get the username for a given UID.
 
@@ -528,7 +531,7 @@ class SessionTracker:
         """
 
         try:
-            return pwd.getpwuid(uid).pw_name
+            return await asyncio.to_thread(pwd.getpwuid, uid).pw_name
         except Exception:
             return str(uid)
 
@@ -543,11 +546,12 @@ class SessionTracker:
         # Optionally, reset any in-memory quota tracking here
         logger.info("Performed daily session reset.")
 
-    def get_active_users(self) -> list:
+    async def get_active_users(self) -> list:
         """
         Return a list of currently active usernames.
         """
-        return [session["username"] for session in self.active_sessions.values()]
+        async with self.session_lock:
+            return [session["username"] for session in self.active_sessions.values()]
 
     def pause_user_time(self, username, timestamp):
         """
@@ -566,7 +570,7 @@ class GuardianDaemonInterface(ServiceInterface):
         self.session_tracker = session_tracker
 
     @method()
-    def LockEvent(
+    async def LockEvent(
         self, session_id: "s", username: "s", locked: "b", timestamp: "d"  # noqa: F821
     ):
         """
@@ -589,18 +593,21 @@ class GuardianDaemonInterface(ServiceInterface):
             f"Received LockEvent: session={session_id} user={username} locked={locked} ts={timestamp} sender={sender}"
         )
         # If session is unknown, log and pause time tracking for locked=True
-        if session_id not in self.session_tracker.active_sessions:
-            logger.warning(
-                f"Lock event for unknown session: {session_id} from sender={sender} user={username}"
-            )
-            # Optionally, pause time tracking for this user
-            if locked:
-                logger.info(
-                    f"Pausing time tracking for user {username} due to lock event from unknown session."
+        async with self.session_tracker.session_lock:
+            if session_id not in self.session_tracker.active_sessions:
+                logger.warning(
+                    f"Lock event for unknown session: {session_id} from sender={sender} user={username}"
                 )
-                self.session_tracker.pause_user_time(username, timestamp)
-            return None
-        self.session_tracker.receive_lock_event(session_id, username, locked, timestamp)
+                # Optionally, pause time tracking for this user
+                if locked:
+                    logger.info(
+                        f"Pausing time tracking for user {username} due to lock event from unknown session."
+                    )
+                    self.session_tracker.pause_user_time(username, timestamp)
+                return None
+        await self.session_tracker.receive_lock_event(
+            session_id, username, locked, timestamp
+        )
         return None
 
     # pause_user_time is now implemented in SessionTracker
@@ -621,6 +628,7 @@ if __name__ == "__main__":
             config.update(user_config)
     # If config.yaml is missing, just use default config
     policy = Policy(config_path if os.path.exists(config_path) else default_config_path)
-    tracker = SessionTracker(policy, config)
+    user_manager = UserManager(policy)
+    tracker = SessionTracker(policy, config, user_manager)
     asyncio.run(tracker.run())
 # logind watcher

@@ -20,9 +20,29 @@ def ipc_call(command, **kwargs):
     """
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.connect(IPC_SOCKET)
-        req = {"command": command, "args": kwargs}
-        s.sendall(json.dumps(req).encode())
-        resp = s.recv(4096)
+
+        # The new protocol expects a command string, not a JSON object.
+        # The command format is "command_name" or "command_name argument".
+        # The dynamic command generation seems to pass arguments in kwargs.
+        # We'll assume for commands with one parameter, it's in the kwargs.
+        arg = next(iter(kwargs.values())) if kwargs else None
+        if arg:
+            message = f"{command} {arg}"
+        else:
+            message = command
+
+        # Send message length then message
+        message_data = message.encode()
+        s.sendall(len(message_data).to_bytes(4, "big"))
+        s.sendall(message_data)
+
+        # Read response length then response
+        len_data = s.recv(4)
+        if not len_data:
+            return json.dumps({"error": "No response from daemon"})
+        msg_len = int.from_bytes(len_data, "big")
+
+        resp = s.recv(msg_len)
         return resp.decode()
 
 

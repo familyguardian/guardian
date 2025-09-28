@@ -1,13 +1,14 @@
 import asyncio
 import datetime
 import hashlib
-import os
 import time
 
 import yaml
 
+from guardian_daemon.config import Config, ConfigError
 from guardian_daemon.enforcer import Enforcer
-from guardian_daemon.logging import get_logger
+from guardian_daemon.ipc import GuardianIPCServer
+from guardian_daemon.logging import get_logger, setup_logging
 from guardian_daemon.policy import Policy
 from guardian_daemon.sessions import SessionTracker
 from guardian_daemon.storage import Storage
@@ -23,70 +24,25 @@ class GuardianDaemon:
     Initializes all core components and controls the flow.
     """
 
-    def __init__(self):
+    def __init__(self, config: Config):
         """
         Initializes Policy, Storage, UserManager, Systemd, SessionTracker, and Enforcer.
-        Loads default-config.yaml first, then config.yaml and overwrites values.
         """
-        # Load Default Configuration
-        with open(
-            os.path.join(os.path.dirname(__file__), "../default-config.yaml"), "r"
-        ) as f:
-            config = yaml.safe_load(f)
-        # Overwrite with values from config.yaml, if available
-        config_path = os.path.join(os.path.dirname(__file__), "../config.yaml")
-        if os.path.exists(config_path):
-            with open(config_path, "r") as f:
-                user_config = yaml.safe_load(f)
-            if user_config:
-                config.update(user_config)
-        db_path = config.get("db_path", "guardian.sqlite")
+        self.config = config
+        db_path = self.config.get("db_path", "guardian.sqlite")
+
         self.policy = Policy()
         self.storage = Storage(db_path)
         self.usermanager = UserManager(self.policy)
         self.systemd = SystemdManager()
-        self.tracker = SessionTracker(self.policy, config)
+        self.tracker = SessionTracker(self.policy, self.config, self.usermanager)
         self.enforcer = Enforcer(self.policy, self.tracker)
-        self.last_config = self._get_config_snapshot()
-        self.agent_paths = {}  # username -> dbus object path
-        self.agent_path_retry = 5  # seconds between retries
-        self.agent_path_attempts = 6  # total attempts
+        self.ipc_server = GuardianIPCServer(self.config, self.tracker, self.policy)
+        self.last_config_hash = self._get_config_hash()
 
-    async def find_agent_path(self, username):
+    def _get_config_hash(self):
         """
-        Poll for the agent D-Bus object path for a given username.
-        Returns the object path if found, else None.
-        """
-        import asyncio
-
-        from dbus_next.aio import MessageBus
-        from dbus_next.constants import BusType
-
-        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-        # Try /org/guardian/Agent, /org/guardian/Agent2, ... up to Agent10
-        for attempt in range(self.agent_path_attempts):
-            for n in range(1, 11):
-                if n == 1:
-                    obj_path = "/org/guardian/Agent"
-                else:
-                    obj_path = f"/org/guardian/Agent{n}"
-                try:
-                    proxy = await bus.introspect("org.guardian.Agent", obj_path)
-                    iface = bus.get_proxy_object(
-                        "org.guardian.Agent", obj_path, proxy
-                    ).get_interface("org.guardian.Agent")
-                    agent_username = await iface.call_get_username()
-                    if agent_username == username:
-                        self.agent_paths[username] = obj_path
-                        return obj_path
-                except Exception:
-                    continue
-            await asyncio.sleep(self.agent_path_retry)
-        return None
-
-    def _get_config_snapshot(self):
-        """
-        Generates a snapshot of the current configuration.
+        Generates a hash of the current configuration data.
 
         Returns:
             str: SHA256 hash of the policy data
@@ -99,10 +55,10 @@ class GuardianDaemon:
         """
         while True:
             await asyncio.sleep(300)
-            old_snapshot = self.last_config
+            old_hash = self.last_config_hash
             self.policy.reload()
-            new_snapshot = self._get_config_snapshot()
-            if new_snapshot != old_snapshot:
+            new_hash = self._get_config_hash()
+            if new_hash != old_hash:
                 logger.info("Config changed, updating timers and UserManager rules.")
                 self.usermanager = UserManager(self.policy)
                 self.usermanager.write_time_rules()
@@ -113,8 +69,8 @@ class GuardianDaemon:
                 start_time = curfew.get("start", "22:00")
                 end_time = curfew.get("end", "06:00")
                 self.systemd.create_curfew_timer(start_time, end_time)
-                self.systemd.reload_systemd()
-                self.last_config = new_snapshot
+                await self.systemd.reload_systemd()
+                self.last_config_hash = new_hash
 
     async def enforce_users(self):
         """
@@ -122,17 +78,10 @@ class GuardianDaemon:
         """
         while True:
             await asyncio.sleep(60)  # Check every minute
-            active_users = self.tracker.get_active_users()
+            # Create a copy of active users to avoid issues with concurrent modification
+            active_users = list(await self.tracker.get_active_users())
             for username in active_users:
-                # Check if agent path is known, else try to find it
-                if username not in self.agent_paths:
-                    path = await self.find_agent_path(username)
-                    if path:
-                        logger.info(f"[DAEMON] Found agent for {username} at {path}")
-                    else:
-                        logger.warning(f"[DAEMON] Could not find agent for {username}")
-                # Now you can send notifications via D-Bus if needed
-                self.enforcer.enforce_user(username)
+                await self.enforcer.enforce_user(username)
 
     def check_and_recover_reset(self):
         """
@@ -172,10 +121,13 @@ class GuardianDaemon:
         start_time = curfew.get("start", "22:00")
         end_time = curfew.get("end", "09:00")
         self.systemd.create_curfew_timer(start_time, end_time)
-        self.systemd.reload_systemd()
+        await self.systemd.reload_systemd()
         self.check_and_recover_reset()
         await asyncio.gather(
-            self.tracker.run(), self.periodic_reload(), self.enforce_users()
+            self.tracker.run(),
+            self.periodic_reload(),
+            self.enforce_users(),
+            self.ipc_server.start(),
         )
 
 
@@ -183,8 +135,24 @@ def main():
     """
     Entry Point for the Guardian-Daemon.
     """
-    daemon = GuardianDaemon()
-    asyncio.run(daemon.run())
+    try:
+        config = Config()
+        setup_logging(config)  # Setup logging once with the loaded config
+        daemon = GuardianDaemon(config)
+        asyncio.run(daemon.run())
+    except ConfigError as e:
+        # Use a basic logger if config fails, as structlog might not be configured.
+        import logging
+
+        logging.basicConfig()
+        log = logging.getLogger("GuardianDaemon")
+        log.error(f"Configuration error: {e}")
+    except Exception as e:
+        import logging
+
+        logging.basicConfig()
+        log = logging.getLogger("GuardianDaemon")
+        log.error(f"An unexpected error occurred: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

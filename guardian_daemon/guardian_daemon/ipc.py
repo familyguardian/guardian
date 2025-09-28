@@ -2,11 +2,11 @@
 IPC server for admin commands of the Guardian Daemon.
 """
 
-import datetime
+import asyncio
+import grp
 import inspect
 import json
 import os
-import socket
 
 from guardian_daemon.logging import get_logger
 from guardian_daemon.policy import Policy
@@ -22,22 +22,32 @@ class GuardianIPCServer:
     Provides a socket interface for status and control commands.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, tracker: SessionTracker, policy: Policy):
         """
         Initializes the IPC server and opens the Unix socket.
 
         Args:
             config (dict): Configuration data
+            tracker (SessionTracker): The main session tracker instance.
+            policy (Policy): The main policy instance.
         """
-        self.policy = Policy()
-        self.socket_path = config.get("ipc_socket", "/run/guardian-daemon.sock")
-        self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        if os.path.exists(self.socket_path):
-            logger.debug(f"Removing existing socket file: {self.socket_path}")
-            os.remove(self.socket_path)
-        self.server.bind(self.socket_path)
-        self.server.listen(1)
-        logger.info(f"IPC server started on {self.socket_path}")
+        self.config = config
+        self.tracker = tracker
+        self.policy = policy
+        self.socket_path = self.config.get("ipc_socket", "/run/guardian-daemon.sock")
+        self.admin_group = self.config.get("ipc_admin_group")
+        if self.admin_group:
+            try:
+                self.admin_gid = grp.getgrnam(self.admin_group).gr_gid
+            except KeyError:
+                logger.error(
+                    f"Admin group '{self.admin_group}' not found. IPC will only be available to root."
+                )
+                self.admin_gid = None
+        else:
+            self.admin_gid = None
+
+        self.server = None
         self.handlers = {
             "list_kids": self.handle_list_kids,
             "get_quota": self.handle_get_quota,
@@ -45,42 +55,106 @@ class GuardianIPCServer:
             "list_timers": self.handle_list_timers,
             "reload_timers": self.handle_reload_timers,
             "reset_quota": self.handle_reset_quota,
-            "describe_commands": self.handle_describe_commands,  # <--- NEW
+            "describe_commands": self.handle_describe_commands,
         }
 
-    def serve_once(self):
+    async def start(self):
         """
-        Waits for an incoming command, executes the appropriate handler, and sends the response back.
+        Starts the IPC server.
         """
-        conn, _ = self.server.accept()
-        data = conn.recv(1024).decode().strip()
-        logger.debug(f"Received IPC command: {data}")
-        cmd, *args = data.split(" ", 1)
-        handler = self.handlers.get(cmd)
-        if handler:
-            arg = args[0] if args else None
-            logger.debug(f"Dispatching handler for command: {cmd} with arg: {arg}")
-            try:
-                response = handler(arg)
-                conn.sendall(response.encode())
-                logger.debug(f"Sent response: {response}")
-            except Exception as e:
-                logger.error(f"Error handling command '{cmd}': {e}")
-                conn.sendall(b"Error")
+        if os.path.exists(self.socket_path):
+            logger.debug(f"Removing existing socket file: {self.socket_path}")
+            os.remove(self.socket_path)
+
+        self.server = await asyncio.start_unix_server(
+            self.handle_connection, path=self.socket_path
+        )
+
+        # Set permissions on the socket
+        if self.admin_gid is not None:
+            os.chown(self.socket_path, -1, self.admin_gid)
+            os.chmod(self.socket_path, 0o660)
         else:
-            logger.warning(f"Unknown IPC command: {cmd}")
-            conn.sendall(b"Unknown command")
-        conn.close()
+            os.chmod(self.socket_path, 0o600)
+
+        logger.info(f"IPC server started on {self.socket_path}")
+
+    async def handle_connection(self, reader, writer):
+        """
+        Handles an incoming client connection.
+        """
+        peer_creds = writer.get_extra_info("peereid")
+        peer_uid, peer_gid, _ = peer_creds
+
+        if peer_uid != 0 and (self.admin_gid is None or peer_gid != self.admin_gid):
+            logger.warning(
+                f"Unauthorized IPC connection from UID={peer_uid}, GID={peer_gid}. Closing."
+            )
+            writer.close()
+            await writer.wait_closed()
+            return
+
+        try:
+            # Read message length (4 bytes)
+            len_data = await reader.readexactly(4)
+            msg_len = int.from_bytes(len_data, "big")
+
+            # Read message
+            data = await reader.readexactly(msg_len)
+            message = data.decode().strip()
+            logger.debug(f"Received IPC command: {message}")
+
+            cmd, *args = message.split(" ", 1)
+            handler = self.handlers.get(cmd)
+
+            if handler:
+                arg = args[0] if args else None
+                logger.debug(f"Dispatching handler for command: {cmd} with arg: {arg}")
+                try:
+                    # Await handler if it's a coroutine
+                    if asyncio.iscoroutinefunction(handler):
+                        response = await handler(arg)
+                    else:
+                        response = handler(arg)
+
+                    response_data = response.encode()
+                    # Send response length then response
+                    writer.write(len(response_data).to_bytes(4, "big"))
+                    writer.write(response_data)
+                    await writer.drain()
+                    logger.debug(f"Sent response: {response}")
+                except Exception as e:
+                    logger.error(f"Error handling command '{cmd}': {e}")
+                    error_response = json.dumps({"error": str(e)})
+                    error_data = error_response.encode()
+                    writer.write(len(error_data).to_bytes(4, "big"))
+                    writer.write(error_data)
+                    await writer.drain()
+            else:
+                logger.warning(f"Unknown IPC command: {cmd}")
+                unknown_cmd_response = json.dumps({"error": "Unknown command"})
+                unknown_cmd_data = unknown_cmd_response.encode()
+                writer.write(len(unknown_cmd_data).to_bytes(4, "big"))
+                writer.write(unknown_cmd_data)
+                await writer.drain()
+
+        except asyncio.IncompleteReadError:
+            logger.warning("Client closed connection before sending full message.")
+        except Exception as e:
+            logger.error(f"Error in IPC connection handler: {e}")
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
     def handle_list_kids(self, _):
         """
         Returns the list of all kids (users).
         """
-        kids = self.policy.storage.get_all_usernames()
+        kids = self.policy.get_all_usernames()
         logger.debug(f"Listing kids: {kids}")
         return json.dumps({"kids": kids})
 
-    def handle_get_quota(self, kid):
+    async def handle_get_quota(self, kid):
         """
         Returns the current quota status of a kid.
 
@@ -91,43 +165,24 @@ class GuardianIPCServer:
             logger.warning("get_quota called without kid argument")
             return json.dumps({"error": "missing kid"})
 
-        tracker = SessionTracker(self.policy, self.config)
         user_policy = self.policy.get_user_policy(kid)
         if user_policy is None:
             logger.warning(f"get_quota: unknown kid '{kid}'")
             return json.dumps({"error": "unknown kid"})
-        quota = user_policy.get("daily_quota_minutes")
-        if quota is None:
-            quota = self.policy.get_default("daily_quota_minutes")
 
-        reset_time = self.policy.data.get("reset_time", "03:00")
-        now = datetime.datetime.now(datetime.timezone.utc).astimezone()
-        reset_hour, reset_minute = map(int, reset_time.split(":"))
-        today_reset = now.replace(
-            hour=reset_hour, minute=reset_minute, second=0, microsecond=0
-        )
-        if now < today_reset:
-            last_reset = today_reset - datetime.timedelta(days=1)
-        else:
-            last_reset = today_reset
-        storage = tracker.storage
-        sessions = storage.get_sessions_for_user(kid, since=last_reset.timestamp())
-        used = sum((s[6] for s in sessions)) / 60  # Minutes
-        for session in tracker.active_sessions.values():
-            if session["username"] == kid:
-                used += (
-                    datetime.datetime.now().timestamp() - session["start_time"]
-                ) / 60
-        remaining = max(0, quota - used)
+        total_time = await self.tracker.get_total_time(kid)
+        remaining_time = await self.tracker.get_remaining_time(kid)
+        used_time = total_time - remaining_time
+
         logger.debug(
-            f"Quota for {kid}: used={used}, limit={quota}, remaining={remaining}"
+            f"Quota for {kid}: used={used_time}, limit={total_time}, remaining={remaining_time}"
         )
         return json.dumps(
             {
                 "kid": kid,
-                "used": round(used, 2),
-                "limit": quota,
-                "remaining": round(remaining, 2),
+                "used": round(used_time / 60, 2),  # minutes
+                "limit": round(total_time / 60, 2),  # minutes
+                "remaining": round(remaining_time / 60, 2),  # minutes
             }
         )
 
@@ -172,22 +227,11 @@ class GuardianIPCServer:
         logger.info("Timers reloaded via IPC")
         return json.dumps({"status": "timers reloaded"})
 
-    def handle_reset_quota(self, _):
+    async def handle_reset_quota(self, _):
         """
         Resets the daily quota for all users (deletes sessions since last reset).
         """
-
-        reset_time = self.policy.data.get("reset_time", "03:00")
-        now = datetime.datetime.now(datetime.timezone.utc).astimezone()
-        reset_hour, reset_minute = map(int, reset_time.split(":"))
-        today_reset = now.replace(
-            hour=reset_hour, minute=reset_minute, second=0, microsecond=0
-        )
-        if now < today_reset:
-            last_reset = today_reset - datetime.timedelta(days=1)
-        else:
-            last_reset = today_reset
-        self.policy.storage.delete_sessions_since(last_reset.timestamp())
+        await self.tracker.perform_daily_reset()
         logger.info("Quota reset for all users via IPC")
         return json.dumps({"status": "quota reset"})
 

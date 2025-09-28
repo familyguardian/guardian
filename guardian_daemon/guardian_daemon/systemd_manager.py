@@ -3,6 +3,8 @@ Systemd manager for guardian-daemon.
 Creates and manages systemd timers/units for daily reset and curfew.
 """
 
+import asyncio
+import re
 from pathlib import Path
 
 from guardian_daemon.logging import get_logger
@@ -10,6 +12,13 @@ from guardian_daemon.logging import get_logger
 logger = get_logger("SystemdManager")
 
 SYSTEMD_PATH = Path("/etc/systemd/system")
+
+
+def _is_valid_time_format(time_str):
+    """Check if a string is in HH:MM format."""
+    if not isinstance(time_str, str):
+        return False
+    return re.match(r"^(2[0-3]|[01]?[0-9]):([0-5]?[0-9])$", time_str)
 
 
 class SystemdManager:
@@ -27,6 +36,10 @@ class SystemdManager:
         """
         Create a systemd timer and corresponding service unit for the daily quota reset.
         """
+        if not _is_valid_time_format(reset_time):
+            logger.error(f"Invalid reset_time format: '{reset_time}'. Must be HH:MM.")
+            return
+
         timer_name = "guardian-daily-reset"
         logger.debug(
             f"Preparing to create daily reset timer: {timer_name} at {reset_time}"
@@ -71,6 +84,12 @@ WantedBy=timers.target
         """
         Create a systemd timer and service unit for curfew enforcement.
         """
+        if not _is_valid_time_format(start_time) or not _is_valid_time_format(end_time):
+            logger.error(
+                f"Invalid time format for curfew: start='{start_time}', end='{end_time}'. Must be HH:MM."
+            )
+            return
+
         timer_name = "guardian-curfew"
         logger.debug(
             f"Preparing to create curfew timer: {timer_name} from {start_time} to {end_time}"
@@ -108,16 +127,24 @@ WantedBy=timers.target
         except Exception as e:
             logger.error(f"Failed to create curfew timer/service: {e}", exc_info=True)
 
-    def reload_systemd(self):
+    async def reload_systemd(self):
         """
         Reload systemd units to apply changes.
         """
-        import subprocess
-
         logger.debug("Reloading systemd daemon...")
         try:
-            subprocess.run(["systemctl", "daemon-reload"], check=True)
-            logger.info("Systemd daemon reloaded.")
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl",
+                "daemon-reload",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+
+            if proc.returncode != 0:
+                logger.error(f"Failed to reload systemd daemon: {stderr.decode()}")
+            else:
+                logger.info("Systemd daemon reloaded.")
         except Exception as e:
             logger.error(f"Failed to reload systemd daemon: {e}", exc_info=True)
 

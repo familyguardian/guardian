@@ -4,7 +4,11 @@ Manages login time windows for children via /etc/security/time.conf
 and handles user-specific systemd services.
 """
 
+import grp
 import os
+import pwd
+import shutil
+import subprocess
 from pathlib import Path
 
 from guardian_daemon.logging import get_logger
@@ -13,6 +17,18 @@ from guardian_daemon.policy import Policy
 logger = get_logger("UserManager")
 
 TIME_CONF_PATH = Path("/etc/security/time.conf")
+# Assumes the script is run from the project's structure, giving us the root.
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+SOURCE_SERVICE_FILE = PROJECT_ROOT / "systemd_units" / "user" / "guardian_agent.service"
+
+
+def chown_recursive(path, uid, gid):
+    path = Path(path)
+    if path.exists():
+        shutil.chown(path, user=uid, group=gid)
+        if path.is_dir():
+            for sub in path.iterdir():
+                chown_recursive(sub, uid, gid)
 
 
 class UserManager:
@@ -20,10 +36,6 @@ class UserManager:
         """
         Ensure the 'kids' group exists and all managed users are members of it.
         """
-        import grp
-        import pwd
-        import subprocess
-
         group_name = "kids"
         users = set(self.policy.data.get("users", {}).keys())
 
@@ -33,7 +45,13 @@ class UserManager:
             logger.debug(f"Group '{group_name}' already exists.")
         except KeyError:
             logger.info(f"Creating group '{group_name}'.")
-            subprocess.run(["groupadd", group_name], check=True)
+            try:
+                subprocess.run(
+                    ["groupadd", group_name], check=True, capture_output=True, text=True
+                )
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Failed to create group '{group_name}': {e.stderr}")
+                return
 
         # Add each user to the group
         for username in users:
@@ -42,10 +60,32 @@ class UserManager:
             except KeyError:
                 logger.warning(f"User '{username}' does not exist on system.")
                 continue
-            groups = [g.gr_name for g in grp.getgrall() if username in g.gr_mem]
-            if group_name not in groups:
+
+            try:
+                user_groups = [
+                    g.gr_name for g in grp.getgrall() if username in g.gr_mem
+                ]
+                # Also get the primary group
+                uid = pwd.getpwnam(username).pw_uid
+                primary_group = grp.getgrgid(uid).gr_name
+                user_groups.append(primary_group)
+            except Exception as e:
+                logger.error(f"Could not determine groups for user {username}: {e}")
+                continue
+
+            if group_name not in user_groups:
                 logger.info(f"Adding user '{username}' to group '{group_name}'.")
-                subprocess.run(["usermod", "-aG", group_name, username], check=True)
+                try:
+                    subprocess.run(
+                        ["usermod", "-aG", group_name, username],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                except subprocess.CalledProcessError as e:
+                    logger.error(
+                        f"Failed to add user '{username}' to group '{group_name}': {e.stderr}"
+                    )
             else:
                 logger.debug(f"User '{username}' is already in group '{group_name}'.")
 
@@ -57,20 +97,23 @@ class UserManager:
         policy_xml = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
         "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
         <busconfig>
-            <policy group=\"kids\">
-                <allow send_destination=\"org.guardian.Daemon\"/>
-                <allow receive_sender=\"org.guardian.Daemon\"/>
-                <allow own=\"org.guardian.Agent\"/>
-                <allow send_destination=\"org.guardian.Agent\"/>
-                <allow receive_sender=\"org.guardian.Agent\"/>
+            <!-- Consolidated policy for the root user (the daemon) -->
+            <policy user="root">
+                <allow own="org.guardian.Daemon"/>
+                <allow send_destination_prefix="org.guardian.Agent"/>
+                <allow receive_sender_prefix="org.guardian.Agent"/>
             </policy>
-            <policy user=\"root\">
-                <allow own=\"org.guardian.Daemon\"/>
-                <allow send_destination=\"org.guardian.Daemon\"/>
-                <allow receive_sender=\"org.guardian.Daemon\"/>
-                <allow send_destination=\"org.guardian.Agent\"/>
-                <allow receive_sender=\"org.guardian.Agent\"/>
-                <allow own=\"org.guardian.Agent\"/>
+
+            <!-- Policy for managed users -->
+            <policy group="kids">
+                <allow own_prefix="org.guardian.Agent"/>
+                <allow send_destination="org.guardian.Daemon"/>
+                <allow receive_user="root"/>
+            </policy>
+
+            <!-- Default policy for everyone else -->
+            <policy context="default">
+                <allow send_destination="org.guardian.Daemon"/>
             </policy>
         </busconfig>
         """.strip()
@@ -80,6 +123,12 @@ class UserManager:
             logger.info(
                 f"D-Bus policy file written to {policy_path} for group 'kids' and user 'root'."
             )
+            # Reload D-Bus to apply the new policy immediately
+            try:
+                subprocess.run(["systemctl", "reload", "dbus.service"], check=True)
+                logger.info("Reloaded D-Bus system service to apply new policy.")
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                logger.error(f"Failed to reload D-Bus service: {e}")
         except Exception as e:
             logger.error(f"Failed to write D-Bus policy file: {e}")
 
@@ -100,35 +149,41 @@ class UserManager:
         """
         rules = self._generate_rules()
         managed_usernames = set(self.policy.data.get("users", {}).keys())
-        # Backup der bestehenden Datei
+
+        new_lines = ["# Managed by guardian-daemon"]
         if TIME_CONF_PATH.exists():
-            logger.debug(
-                f"Backing up existing time.conf to {TIME_CONF_PATH.with_suffix('.conf.bak')}"
-            )
-            os.rename(TIME_CONF_PATH, TIME_CONF_PATH.with_suffix(".conf.bak"))
-            with open(TIME_CONF_PATH.with_suffix(".conf.bak"), "r") as f:
+            with open(TIME_CONF_PATH, "r") as f:
                 lines = f.readlines()
-            new_lines = []
+
             for line in lines:
-                if line.startswith("login;*"):
+                line = line.strip()
+                if not line or line.startswith("# Managed by guardian-daemon"):
+                    continue
+
+                try:
                     parts = line.strip().split(";")
+                    # Check if the rule is for a user we manage
                     if len(parts) >= 3 and parts[2] in managed_usernames:
-                        logger.debug(f"Replacing rule for managed user: {parts[2]}")
+                        logger.debug(f"Removing old rule for managed user: {parts[2]}")
                         continue
-                new_lines.append(line.rstrip("\n"))
+                except Exception:
+                    # Keep lines that don't parse correctly
+                    pass
+
+                new_lines.append(line)
         else:
             logger.debug("No existing time.conf found, starting fresh.")
-            new_lines = []
-        # Schreibe die neue Datei
-        with open(TIME_CONF_PATH, "w") as f:
-            logger.info(f"Writing updated time.conf with {len(rules)} managed rules.")
-            f.write("# Managed by guardian-daemon\n")
-            for line in new_lines:
-                if line:
+
+        new_lines.extend(rules)
+
+        try:
+            with open(TIME_CONF_PATH, "w") as f:
+                for line in new_lines:
                     f.write(line + "\n")
-            for rule in rules:
-                logger.debug(f"Adding rule: {rule}")
-                f.write(rule + "\n")
+            os.chmod(TIME_CONF_PATH, 0o644)
+            logger.info(f"Wrote {len(rules)} managed rules to {TIME_CONF_PATH}")
+        except Exception as e:
+            logger.error(f"Failed to write to {TIME_CONF_PATH}: {e}")
 
     def _generate_rules(self):
         """
@@ -142,7 +197,7 @@ class UserManager:
             if curfew:
                 for day, times in curfew.items():
                     # PAM time.conf syntax: <service>;<ttys>;<users>;<day>;<start>-<end>
-                    rules.append(f"login;*;{username};{day};{times}")
+                    rules.append(f"login;*;{username};!{day};!{times}")
         logger.debug(f"Generated {len(rules)} PAM time rules.")
         return rules
 
@@ -152,92 +207,125 @@ class UserManager:
         """
         if TIME_CONF_PATH.exists():
             logger.info("Removing managed time rules from time.conf.")
-            with open(TIME_CONF_PATH, "r") as f:
-                lines = f.readlines()
-            with open(TIME_CONF_PATH, "w") as f:
+            try:
+                with open(TIME_CONF_PATH, "r") as f:
+                    lines = f.readlines()
+
+                new_lines = []
                 for line in lines:
-                    if not line.startswith("login;*") and not line.startswith(
-                        "# Managed by guardian-daemon"
-                    ):
-                        f.write(line)
+                    line = line.strip()
+                    if not line or line.startswith("# Managed by guardian-daemon"):
+                        continue
+
+                    is_managed = False
+                    try:
+                        parts = line.strip().split(";")
+                        if len(parts) >= 3 and parts[2] in self.policy.data.get(
+                            "users", {}
+                        ):
+                            is_managed = True
+                    except Exception:
+                        pass
+
+                    if not is_managed:
+                        new_lines.append(line)
+
+                with open(TIME_CONF_PATH, "w") as f:
+                    for line in new_lines:
+                        f.write(line + "\n")
+            except Exception as e:
+                logger.error(f"Failed to remove time rules from {TIME_CONF_PATH}: {e}")
 
     def setup_user_service(self, username: str):
         """
         Sets up the guardian_agent.service for the given user's systemd.
         Updates the service file if its checksum has changed.
         """
-        import hashlib
+        try:
+            user_info = pwd.getpwnam(username)
+            user_home = Path(user_info.pw_dir)
+            user_systemd_path = user_home / ".config/systemd/user"
+            service_file_path = user_systemd_path / "guardian_agent.service"
 
-        user_systemd_path = Path(f"/home/{username}/.config/systemd/user")
-        service_file_path = user_systemd_path / "guardian_agent.service"
+            user_systemd_path.mkdir(parents=True, exist_ok=True)
+            # Ownership will be set recursively below
 
-        # Ensure the systemd user directory exists
-        user_systemd_path.mkdir(parents=True, exist_ok=True)
-
-        # Compute checksum of the source service file
-        source_service_file = Path(
-            "/usr/local/guardian/systemd_units/user/guardian_agent.service"
-        )
-        if not source_service_file.exists():
-            logger.error(f"Source service file {source_service_file} does not exist.")
-            return
-
-        with open(source_service_file, "rb") as src:
-            source_checksum = hashlib.sha256(src.read()).hexdigest()
-
-        # Check if the destination file exists and compare checksums
-        if service_file_path.exists():
-            with open(service_file_path, "rb") as dest:
-                dest_checksum = hashlib.sha256(dest.read()).hexdigest()
-            if source_checksum == dest_checksum:
-                logger.debug(f"Service file for {username} is up-to-date.")
+            if not SOURCE_SERVICE_FILE.exists():
+                logger.error(
+                    f"Source service file {SOURCE_SERVICE_FILE} does not exist."
+                )
                 return
 
-        # Copy the updated service file
-        logger.debug(f"Updating service file for {username} at {service_file_path}")
-        with (
-            open(source_service_file, "r") as src,
-            open(service_file_path, "w") as dest,
-        ):
-            dest.write(src.read())
+            shutil.copy(SOURCE_SERVICE_FILE, service_file_path)
+            # Ownership will be set recursively below
 
-        # Reload, enable, and start the service for the user
-        os.system(f"runuser -l {username} -c 'systemctl --user daemon-reload'")
-        os.system(
-            f"runuser -l {username} -c 'systemctl --user enable guardian_agent.service'"
-        )
-        os.system(
-            f"runuser -l {username} -c 'systemctl --user start guardian_agent.service'"
-        )
+            # Reload, enable, and start the service for the user
+            self._run_systemctl_user_command(username, "daemon-reload")
+            self._run_systemctl_user_command(
+                username, "enable", "guardian_agent.service"
+            )
+            self._run_systemctl_user_command(
+                username, "start", "guardian_agent.service"
+            )
+
+            # Recursively set ownership for all files and directories in ~/.config
+            chown_recursive(user_home / ".config", user_info.pw_uid, user_info.pw_gid)
+
+        except KeyError:
+            logger.error(f"User '{username}' not found, cannot setup service.")
+        except Exception as e:
+            logger.error(f"Failed to setup user service for {username}: {e}")
 
     def ensure_systemd_user_service(self, username):
         """
         Ensure that systemd user services are set up for the given user without enabling lingering.
         """
         try:
-            # Check if systemd user directory exists
-            user_systemd_path = os.path.expanduser(f"~{username}/.config/systemd/user")
-            if not os.path.exists(user_systemd_path):
-                os.makedirs(user_systemd_path)
+            user_info = pwd.getpwnam(username)
+            user_home = Path(user_info.pw_dir)
+            service_file = user_home / ".config/systemd/user/guardian_agent.service"
 
-            # Check if the guardian_agent.service file exists
-            service_file = os.path.join(user_systemd_path, "guardian_agent.service")
-            if not os.path.exists(service_file):
+            if not service_file.exists():
                 self.setup_user_service(username)
 
             # Check if the guardian_agent service is active, if not, start it
-            status_cmd = f"runuser -l {username} -c 'systemctl --user is-active guardian_agent.service'"
-            status = os.popen(status_cmd).read().strip()
-            if status != "active":
+            result = self._run_systemctl_user_command(
+                username, "is-active", "guardian_agent.service"
+            )
+            if result and result.stdout.strip() != "active":
                 logger.debug(f"Starting guardian_agent service for user {username}.")
-                os.system(
-                    f"runuser -l {username} -c 'systemctl --user start guardian_agent.service'"
+                self._run_systemctl_user_command(
+                    username, "start", "guardian_agent.service"
                 )
             else:
                 logger.debug(
                     f"guardian_agent service for user {username} is already active."
                 )
 
-            logger.debug(f"Systemd user service directory ensured for user {username}.")
+        except KeyError:
+            logger.error(f"User '{username}' not found, cannot ensure systemd service.")
         except Exception as e:
             logger.error(f"Failed to ensure systemd user service for {username}: {e}")
+
+    def _run_systemctl_user_command(self, username, *args):
+        """Helper to run systemctl --user commands for a given user."""
+        try:
+            command = [
+                "runuser",
+                "-l",
+                username,
+                "-c",
+                f"systemctl --user {' '.join(args)}",
+            ]
+            result = subprocess.run(command, check=True, capture_output=True, text=True)
+            return result
+        except subprocess.CalledProcessError as e:
+            logger.error(
+                f"Error running systemctl command for {username} ('{' '.join(args)}'): {e.stderr}"
+            )
+            return None
+        except FileNotFoundError:
+            logger.error(
+                "`runuser` command not found. Is the systemd package installed?"
+            )
+            return None
