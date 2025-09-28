@@ -413,7 +413,12 @@ class UserManager:
                                         ):
                                             feature = line.strip().replace("- ", "")
                                             if feature:
-                                                current_features.append(feature)
+                                                # Store the feature name without the "with-" prefix
+                                                # It will be added back when constructing the command
+                                                if feature.startswith("with-"):
+                                                    current_features.append(feature)
+                                                else:
+                                                    current_features.append(feature)
 
                                     logger.info(
                                         f"Detected features to preserve: {current_features}"
@@ -453,8 +458,18 @@ class UserManager:
                                     logger.info(
                                         f"Preserving features: {', '.join(current_features)}"
                                     )
-                                    cmd.extend(current_features)
+
+                                    # Make sure each feature has the with- prefix
+                                    for feature in current_features:
+                                        # Check if feature already has the with- prefix
+                                        if feature.startswith("with-"):
+                                            cmd.append(feature)
+                                        else:
+                                            cmd.append(f"with-{feature}")
                                 cmd.append("--force")
+
+                                # Log the exact command for debugging
+                                logger.info(f"Running command: {' '.join(cmd)}")
 
                                 subprocess.run(
                                     cmd, check=True, capture_output=True, text=True
