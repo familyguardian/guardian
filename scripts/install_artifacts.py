@@ -252,7 +252,7 @@ def install_systemd_units():
     # Enable and start guardian-daemon service
     try:
         subprocess.run(["systemctl", "enable", "guardian_daemon.service"], check=True)
-        subprocess.run(["systemctl", "start", "guardian_daemon.service"], check=True)
+        subprocess.run(["systemctl", "restart", "guardian_daemon.service"], check=True)
         log("Enabled and started guardian_daemon.service")
     except subprocess.CalledProcessError as e:
         log(f"Failed to enable/start guardian_daemon.service: {e}")
