@@ -9,6 +9,7 @@ import os
 import pwd
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from guardian_daemon.logging import get_logger
@@ -89,6 +90,54 @@ class UserManager:
             else:
                 logger.debug(f"User '{username}' is already in group '{group_name}'.")
 
+    def ensure_pam_time_module(self):
+        """
+        Ensure that the pam_time.so module is properly configured in PAM services.
+        """
+        PAM_SERVICES = ["sddm", "login", "system-auth"]
+
+        for service in PAM_SERVICES:
+            service_file = Path(f"/etc/pam.d/{service}")
+            if not service_file.exists():
+                continue
+
+            try:
+                with open(service_file, "r") as f:
+                    content = f.read()
+
+                if "pam_time.so" not in content:
+                    # Make a backup of the original file
+                    backup_file = service_file.with_suffix(f".bak-{int(time.time())}")
+                    shutil.copy(service_file, backup_file)
+
+                    # Find the account section and add pam_time.so
+                    lines = content.split("\n")
+                    account_section = [
+                        i
+                        for i, line in enumerate(lines)
+                        if line.strip().startswith("account")
+                        and not line.strip().startswith("#")
+                    ]
+
+                    if account_section:
+                        # Insert after the last account line
+                        insert_pos = max(account_section) + 1
+                        lines.insert(insert_pos, "account    required    pam_time.so")
+
+                        # Write the updated file
+                        with open(service_file, "w") as f:
+                            f.write("\n".join(lines))
+
+                        logger.info(f"Added pam_time.so module to {service_file}")
+                    else:
+                        logger.warning(
+                            f"Could not find account section in {service_file}"
+                        )
+            except Exception as e:
+                logger.error(f"Failed to update PAM configuration for {service}: {e}")
+
+        logger.info("PAM time module configuration checked")
+
     def setup_dbus_policy(self):
         """
         Creates /etc/dbus-1/system.d/guardian.conf to allow group 'kids' access to org.guardian.Daemon.
@@ -147,6 +196,9 @@ class UserManager:
         Updates the time rules for all children according to the policy in /etc/security/time.conf,
         without overwriting foreign rules.
         """
+        # Ensure the PAM time module is loaded in the relevant PAM services
+        self.ensure_pam_time_module()
+
         rules = self._generate_rules()
         managed_usernames = set(self.policy.data.get("users", {}).keys())
 
@@ -197,7 +249,9 @@ class UserManager:
             if curfew:
                 for day, times in curfew.items():
                     # PAM time.conf syntax: <service>;<ttys>;<users>;<day>;<start>-<end>
-                    rules.append(f"login;*;{username};!{day};!{times}")
+                    # Allow login during allowed hours, for multiple services
+                    for service in ["login", "sddm", "gdm", "lightdm", "xdm", "kde"]:
+                        rules.append(f"{service};*;{username};{day};{times}")
         logger.debug(f"Generated {len(rules)} PAM time rules.")
         return rules
 
