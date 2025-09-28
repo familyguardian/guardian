@@ -871,10 +871,55 @@ class UserManager:
         rules = []
         users = self.policy.data.get("users", {})
 
+        # Get the current username to ensure we don't lock out the admin
+        current_username = None
+        try:
+            import os
+
+            current_username = (
+                os.getenv("SUDO_USER")
+                or os.getenv("USER")
+                or pwd.getpwuid(os.getuid()).pw_name
+            )
+            logger.info(f"Current username detected as {current_username}")
+        except Exception as e:
+            logger.warning(f"Could not determine current username: {e}")
+
+        # Add a critical safety mechanism - PAM time rules work by default-deny
+        # We need to explicitly allow ALL non-managed users for ALL services at ALL times
+
         # List of services to protect with time rules
+        services = ["login", "sddm", "gdm", "lightdm", "xdm", "kde", "sudo"]
+
+        # First, add explicit ALLOW rules for all non-managed users
+        rules.append("# Default allow for all non-managed users")
+        for service in services:
+            # The special syntax !users|user1|user2... means "NOT these users" (i.e., all other users)
+            # This creates an allowance rule for all users EXCEPT those in our managed list
+            managed_users_str = "|".join(users.keys())
+            if managed_users_str:  # Only add if we have managed users
+                rules.append(f"{service};*;!{managed_users_str};Al;Al")
+
+        # Additional safety: add explicit rules for specific important users
+        rules.append("# Explicit allow for important system users")
+        rules.append("sudo;*;root;Al;Al")  # root can always use sudo
+
+        # If we detected the current admin user, ensure they're not restricted
+        if current_username:
+            # Allow the admin user on all services
+            for service in services:
+                rules.append(f"{service};*;{current_username};Al;Al")
+            rules.append(
+                f"# Ensuring admin user {current_username} always has access"
+            )  # List of services to protect with time rules
         services = ["login", "sddm", "gdm", "lightdm", "xdm", "kde"]
 
         for username, user_policy in users.items():
+            # Skip applying restrictions to the current admin user for all services
+            if current_username and username == current_username:
+                logger.info(f"Skipping time restrictions for admin user {username}")
+                continue
+
             curfew = user_policy.get("curfew", self.policy.get_default("curfew"))
             # Beispiel: weekdays: "08:00-20:00"
             if curfew:
