@@ -58,6 +58,14 @@ ssh -t "$TEST_USER@$TEST_HOST" "
     echo 'Running installation script...'
     sudo python3 '$PROJECT_DIR/scripts/install_artifacts.py'
 
+    # Wait a few seconds for the daemon to initialize
+    echo 'Waiting for the daemon to start...'
+    sleep 5
+
+    # Check the daemon's logs
+    echo 'Displaying daemon logs...'
+    journalctl -u guardian_daemon.service --no-pager --since "1 minute ago"
+
     echo '--- Deployment and installation complete ---'
 "
 
