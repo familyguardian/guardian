@@ -369,7 +369,6 @@ class UserManager:
             rules.append("# --- Guardian Managed Rules Below ---")
 
         # Rule 2: Define specific time restrictions for each managed user.
-        services_to_restrict = ["login", "sddm", "gdm", "lightdm", "xdm", "kde", "sudo"]
         day_mapping = {
             "weekdays": "Wk",
             "saturday": "Sa",
@@ -395,10 +394,9 @@ class UserManager:
                         time_specs.append(f"{day_code}{start}-{end}")
 
                 if time_specs:
-                    # Apply the combined rule to all relevant services for the user
+                    # Apply the combined rule to all services and ttys for the user.
                     combined_times = "&".join(time_specs)
-                    services_spec = "&".join(services_to_restrict)
-                    rules.append(f"{services_spec};*;{username};{combined_times}")
+                    rules.append(f"*;*;{username};{combined_times}")
 
         logger.debug(f"Generated {len(rules)} PAM time rules.")
         return rules
