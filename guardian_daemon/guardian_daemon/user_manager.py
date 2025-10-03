@@ -132,7 +132,7 @@ class UserManager:
                     if in_features_section and line.strip().startswith("-"):
                         feature = line.strip().replace("-", "").strip()
                         if feature:
-                            current_features.append(f"with-{feature}")
+                            current_features.append(feature)
                 logger.info(
                     f"Detected base profile '{current_profile_name}' with features: {current_features}"
                 )
