@@ -10,6 +10,72 @@ import datetime
 GUARDIAN_DIR = "/usr/local/guardian"
 
 
+def ensure_tools():
+    """
+    Checks for and installs required command-line tools like 'uv'.
+    This function assumes it's running with sudo privileges.
+    """
+    log("Checking for required tools...")
+
+    # Check for 'uv'
+    uv_path = shutil.which("uv")
+    if uv_path and os.path.exists(uv_path):
+        log(f"'uv' is already installed at {uv_path}.")
+        return
+
+    log("'uv' not found. Attempting to install it system-wide using dnf.")
+
+    # Install 'uv' using dnf
+    try:
+        subprocess.run(
+            ["dnf", "install", "-y", "uv"],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        log("Successfully installed 'uv' via dnf.")
+
+        # Verify uv is now in PATH
+        new_uv_path = shutil.which("uv")
+        if new_uv_path:
+            log(f"'uv' is now available at {new_uv_path}")
+        else:
+            log("Warning: 'uv' still not found in PATH after installation. Installation might fail.")
+
+    except subprocess.CalledProcessError as e:
+        log(f"Failed to install 'uv' using dnf: {e.stderr if hasattr(e, 'stderr') else str(e)}")
+        log("Trying alternative installation methods...")
+
+        # Fallback to pip if dnf fails
+        try:
+            subprocess.run(
+                ["pip", "install", "--user", "uv"],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            log("Successfully installed 'uv' via pip.")
+
+            # Make sure it's in PATH by creating a symlink if needed
+            uv_path = shutil.which("uv")
+            if not uv_path:
+                # Look for it in common pip user installation location
+                user_bin_path = os.path.expanduser("~/.local/bin/uv")
+                if os.path.exists(user_bin_path):
+                    symlink_path = "/usr/local/bin/uv"
+                    log(f"Creating symlink from {user_bin_path} to {symlink_path} for system-wide access.")
+                    try:
+                        if os.path.exists(symlink_path):
+                            os.unlink(symlink_path)
+                        os.symlink(user_bin_path, symlink_path)
+                    except OSError as e:
+                        log(f"Warning: Could not create symlink: {e}")
+        except subprocess.CalledProcessError as e:
+            log(f"Failed to install 'uv': {e.stderr if hasattr(e, 'stderr') else str(e)}")
+            log("Please install 'uv' manually and try again.")
+            sys.exit(1)
+
+
 def log(msg):
     """
     Simple logging helper. Prints timestamped messages.
@@ -310,6 +376,7 @@ def install_ctl():
         sys.exit(1)
 
 if __name__ == "__main__":
+    ensure_tools()
     create_guardian_user()
     install_shared_python()
     install_daemon()

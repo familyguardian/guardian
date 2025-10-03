@@ -17,3 +17,4 @@ _site
 *.sqlite3
 config.yaml
 docs/_build
+scripts/testenv.conf
