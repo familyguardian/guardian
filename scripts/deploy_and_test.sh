@@ -64,7 +64,7 @@ ssh -t "$TEST_USER@$TEST_HOST" "
 
     # Check the daemon's logs
     echo 'Displaying daemon logs...'
-    journalctl -u guardian_daemon.service --no-pager --since "1 minute ago"
+    journalctl -u guardian_daemon.service -n 100 --no-pager
 
     echo '--- Deployment and installation complete ---'
 "
