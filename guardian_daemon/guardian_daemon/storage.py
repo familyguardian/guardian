@@ -462,7 +462,7 @@ class Storage:
         first_login = None
         last_logout = None
 
-        for start_time, end_time, _, session_id in sessions:
+        for start_time, end_time, session_id in sessions:
             # For sessions still in progress, use current time as end
             if not end_time or end_time == 0:
                 end_time = time.time()
