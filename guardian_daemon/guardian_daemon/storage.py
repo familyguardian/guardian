@@ -3,9 +3,11 @@ Central SQLite interface for guardian-daemon.
 Provides functions for session handling and future extensions.
 """
 
+import datetime
 import json
 import os
 import sqlite3
+import time
 from typing import Optional
 
 from guardian_daemon.logging import get_logger
@@ -164,6 +166,36 @@ class Storage:
                     )
                 """
                 )
+
+                # Create history table for daily usage summaries
+                self.conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT NOT NULL,
+                        date TEXT NOT NULL,  -- Store as YYYY-MM-DD
+                        total_screen_time INTEGER NOT NULL,  -- In seconds
+                        login_count INTEGER NOT NULL,
+                        first_login TEXT,  -- Timestamp
+                        last_logout TEXT,  -- Timestamp
+                        quota_exceeded BOOLEAN,
+                        bonus_time_used INTEGER,  -- In seconds
+                        created_at TEXT NOT NULL,  -- Timestamp when record was created
+                        UNIQUE(username, date)
+                    )
+                """
+                )
+
+                # Add last_reset_date field to meta if it doesn't exist
+                c.execute("SELECT value FROM meta WHERE key='last_reset_date'")
+                if not c.fetchone():
+                    self.conn.execute(
+                        """
+                        INSERT OR IGNORE INTO meta (key, value)
+                        VALUES ('last_reset_date', date('now'))
+                        """
+                    )
+
                 # Migrate sessions table to add missing columns
                 c.execute("PRAGMA table_info(sessions)")
                 columns = [row[1] for row in c.fetchall()]
@@ -331,6 +363,258 @@ class Storage:
             ("last_reset", str(ts)),
         )
         self.conn.commit()
+
+    def get_last_reset_date(self) -> str:
+        """
+        Retrieve the last daily reset date from the database.
+        Returns:
+            str: Date in YYYY-MM-DD format
+        """
+        c = self.conn.cursor()
+        c.execute("SELECT value FROM meta WHERE key='last_reset_date'")
+        row = c.fetchone()
+        if row:
+            return row[0]
+        # Default to today if not found
+        return datetime.date.today().strftime("%Y-%m-%d")
+
+    def set_last_reset_date(self, date_str: str):
+        """
+        Store the last daily reset date in the database.
+        Args:
+            date_str (str): Date in YYYY-MM-DD format
+        """
+        c = self.conn.cursor()
+        c.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            ("last_reset_date", date_str),
+        )
+        self.conn.commit()
+
+    def summarize_user_sessions(self, username: str, date: str = None):
+        """
+        Summarize all sessions for a user on a given date and create a history entry.
+        If date is not provided, summarize sessions from the most recent day.
+
+        Args:
+            username (str): Username to summarize sessions for
+            date (str, optional): Date in YYYY-MM-DD format, defaults to today
+
+        Returns:
+            dict: Summary of session data
+        """
+        import datetime
+
+        if not date:
+            # Get most recent session date for user
+            c = self.conn.cursor()
+            c.execute(
+                """
+                SELECT date(start_time, 'unixepoch', 'localtime') as session_date
+                FROM sessions
+                WHERE username = ?
+                ORDER BY start_time DESC LIMIT 1
+                """,
+                (username,),
+            )
+            result = c.fetchone()
+            if result:
+                date = result[0]
+            else:
+                # No sessions found, use today's date
+                date = datetime.date.today().strftime("%Y-%m-%d")
+
+        # Get start/end of day in local time
+        date_obj = datetime.datetime.strptime(date, "%Y-%m-%d").date()
+        start_of_day = datetime.datetime.combine(date_obj, datetime.time.min)
+        end_of_day = datetime.datetime.combine(date_obj, datetime.time.max)
+
+        # Convert to epoch timestamps
+        start_ts = start_of_day.timestamp()
+        end_ts = end_of_day.timestamp()
+
+        # Query sessions for this user on this day
+        c = self.conn.cursor()
+        c.execute(
+            """
+            SELECT
+                start_time,
+                end_time,
+                duration,
+                session_id
+            FROM sessions
+            WHERE
+                username = ? AND
+                (
+                    (start_time >= ? AND start_time <= ?) OR
+                    (end_time >= ? AND end_time <= ?) OR
+                    (start_time < ? AND (end_time > ? OR end_time = 0))
+                )
+            ORDER BY start_time
+            """,
+            (username, start_ts, end_ts, start_ts, end_ts, start_ts, start_ts),
+        )
+        sessions = c.fetchall()
+
+        # Calculate summary statistics
+        total_screen_time = 0
+        login_count = len(sessions)
+        first_login = None
+        last_logout = None
+
+        for start_time, end_time, _, session_id in sessions:
+            # For sessions still in progress, use current time as end
+            if not end_time or end_time == 0:
+                end_time = time.time()
+
+            # Only count time that falls within this day
+            adjusted_start = max(start_time, start_ts)
+            adjusted_end = min(end_time, end_ts)
+
+            # Add the duration that falls within this day
+            if adjusted_end > adjusted_start:
+                total_screen_time += adjusted_end - adjusted_start
+
+            # Track first login and last logout within this day
+            if not first_login or start_time < first_login:
+                first_login = start_time
+
+            if not last_logout or (end_time and end_time > last_logout):
+                last_logout = end_time
+
+        # Create summary object
+        summary = {
+            "username": username,
+            "date": date,
+            "total_screen_time": int(total_screen_time),
+            "login_count": login_count,
+            "first_login": (
+                datetime.datetime.fromtimestamp(first_login).isoformat()
+                if first_login
+                else None
+            ),
+            "last_logout": (
+                datetime.datetime.fromtimestamp(last_logout).isoformat()
+                if last_logout and last_logout != 0
+                else None
+            ),
+            "quota_exceeded": False,  # Will be set by calling function if needed
+            "bonus_time_used": 0,  # Will be set by calling function if needed
+            "created_at": datetime.datetime.now().isoformat(),
+        }
+
+        return summary
+
+    def save_history_entry(self, summary: dict):
+        """
+        Save a history entry from a session summary.
+
+        Args:
+            summary (dict): Session summary data
+        """
+        c = self.conn.cursor()
+        c.execute(
+            """
+            INSERT OR REPLACE INTO history
+            (username, date, total_screen_time, login_count, first_login, last_logout,
+             quota_exceeded, bonus_time_used, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                summary["username"],
+                summary["date"],
+                summary["total_screen_time"],
+                summary["login_count"],
+                summary["first_login"],
+                summary["last_logout"],
+                1 if summary["quota_exceeded"] else 0,
+                summary["bonus_time_used"],
+                summary["created_at"],
+            ),
+        )
+        self.conn.commit()
+        logger.info(
+            f"Saved history entry for {summary['username']} on {summary['date']}"
+        )
+
+    def clean_old_sessions(self, username: str, before_date: str = None):
+        """
+        Remove old session records for a user after they've been summarized to history.
+
+        Args:
+            username (str): Username to clean sessions for
+            before_date (str, optional): Remove sessions before this date (YYYY-MM-DD)
+                                         If not provided, removes all sessions
+        """
+        c = self.conn.cursor()
+
+        if before_date:
+            # Convert date to timestamp
+            date_obj = datetime.datetime.strptime(before_date, "%Y-%m-%d").date()
+            cutoff_ts = datetime.datetime.combine(
+                date_obj, datetime.time.min
+            ).timestamp()
+
+            # Get count before deletion
+            c.execute(
+                "SELECT COUNT(*) FROM sessions WHERE username = ? AND end_time < ?",
+                (username, cutoff_ts),
+            )
+            count = c.fetchone()[0]
+
+            # Delete sessions
+            c.execute(
+                "DELETE FROM sessions WHERE username = ? AND end_time < ?",
+                (username, cutoff_ts),
+            )
+            self.conn.commit()
+            logger.info(
+                f"Removed {count} old sessions for {username} before {before_date}"
+            )
+        else:
+            # Get count before deletion
+            c.execute("SELECT COUNT(*) FROM sessions WHERE username = ?", (username,))
+            count = c.fetchone()[0]
+
+            # Delete all sessions for this user
+            c.execute("DELETE FROM sessions WHERE username = ?", (username,))
+            self.conn.commit()
+            logger.info(f"Removed all {count} sessions for {username}")
+
+    def get_history(self, username: str, start_date: str = None, end_date: str = None):
+        """
+        Retrieve history entries for a user within a date range.
+
+        Args:
+            username (str): Username to get history for
+            start_date (str, optional): Start date in YYYY-MM-DD format
+            end_date (str, optional): End date in YYYY-MM-DD format
+
+        Returns:
+            list: List of history entries
+        """
+        c = self.conn.cursor()
+        params = [username]
+        query = "SELECT * FROM history WHERE username = ?"
+
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+
+        query += " ORDER BY date DESC"
+
+        c.execute(query, params)
+        columns = [description[0] for description in c.description]
+        history_entries = []
+
+        for row in c.fetchall():
+            history_entries.append(dict(zip(columns, row)))
+
+        return history_entries
 
     def close(self):
         """

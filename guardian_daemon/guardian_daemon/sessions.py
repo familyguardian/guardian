@@ -362,6 +362,22 @@ class SessionTracker:
                 f"Logout: {session['username']} Session {session_id} Duration: {effective_duration:.1f}s (locked: {locked_time:.1f}s)"
             )
 
+            # Check if this is the last session for this user today
+            async with self.session_lock:
+                user_has_active_sessions = any(
+                    s["username"] == session["username"]
+                    for s in self.active_sessions.values()
+                )
+
+            # If this was the last active session, consider summarizing the day
+            if not user_has_active_sessions:
+                # Check time of day - if it's late in the day (past 8 PM), summarize
+                hour = datetime.datetime.now().hour
+                if hour >= 20:  # 8 PM
+                    await self.check_usage_summarize(
+                        session["username"], effective_duration
+                    )
+
     async def check_quota(self, username: str) -> bool:
         """
         Sum all sessions since the last reset and check against the daily quota.
@@ -380,6 +396,13 @@ class SessionTracker:
         total_allowed = await self.get_total_time(username)
         used_time = await self._calculate_used_time(username)
 
+        # If the quota is reached, trigger the summarization
+        if used_time >= total_allowed:
+            await self.check_usage_summarize(username, used_time, quota_reached=True)
+            logger.info(
+                f"Quota reached for {username}: {used_time/60:.1f} minutes used of {total_allowed/60:.1f} minute quota"
+            )
+
         return used_time < total_allowed
 
     async def run(self):
@@ -388,6 +411,9 @@ class SessionTracker:
         Also checks for already logged-in child sessions on startup.
         Periodically updates session progress in the database.
         """
+        # Check for daily reset on startup/wake
+        await self.check_daily_reset_on_startup()
+
         bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
         await bus.request_name("org.guardian.Daemon")
         daemon_iface = GuardianDaemonInterface(self)
@@ -535,16 +561,66 @@ class SessionTracker:
         except Exception:
             return str(uid)
 
-    def perform_daily_reset(self):
+    async def perform_daily_reset(self):
         """
-        Perform daily reset: delete sessions since last reset and reset quotas if needed.
+        Perform daily reset: summarize sessions, create history entries,
+        clean up sessions table, and reset quotas.
+
+        This should be called when:
+        1. The system is first booted/unlocked for the day
+        2. The daily quota is reached
+        3. The configured reset_time is reached
         """
-        # Get last reset timestamp
-        last_reset = self.storage.get_last_reset_timestamp()
-        if last_reset is not None:
-            self.storage.delete_sessions_since(last_reset)
-        # Optionally, reset any in-memory quota tracking here
-        logger.info("Performed daily session reset.")
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        last_reset_date = self.storage.get_last_reset_date()
+
+        # Check if we already reset today
+        if last_reset_date == today:
+            logger.debug(f"Daily reset already performed today ({today})")
+            return
+
+        logger.info(
+            f"Performing daily reset. Last reset: {last_reset_date}, Today: {today}"
+        )
+
+        # Get all managed users
+        kids = set(self.policy.data.get("users", {}).keys())
+
+        # Process each child user
+        for username in kids:
+            try:
+                # Get settings to determine quota
+                user_settings = self.policy.get_user_policy(username)
+                daily_quota_minutes = user_settings.get(
+                    "daily_quota_minutes", 90
+                )  # Default 90 minutes
+
+                # Summarize sessions for this user
+                summary = self.storage.summarize_user_sessions(
+                    username, last_reset_date
+                )
+
+                # Check if quota was exceeded
+                if summary["total_screen_time"] > (daily_quota_minutes * 60):
+                    summary["quota_exceeded"] = True
+
+                # TODO: Calculate bonus time used (future feature)
+
+                # Save to history
+                self.storage.save_history_entry(summary)
+
+                # Clean up old sessions
+                self.storage.clean_old_sessions(username, today)
+
+                logger.info(
+                    f"Reset completed for user {username}: {summary['total_screen_time']/60:.1f} minutes used"
+                )
+            except Exception as e:
+                logger.error(f"Error during reset for user {username}: {e}")
+
+        # Update last reset date
+        self.storage.set_last_reset_date(today)
+        logger.info(f"Daily reset complete. Updated last reset date to {today}")
 
     async def get_active_users(self) -> list:
         """
@@ -562,6 +638,70 @@ class SessionTracker:
             self.user_locks = {}
         self.user_locks[username] = timestamp
         logger.info(f"User {username} time tracking paused at {timestamp}.")
+
+    async def check_daily_reset_on_startup(self):
+        """
+        Check if we need to perform a daily reset on daemon startup or system wake.
+        This is based on the date comparison between today and the last reset date.
+        """
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        last_reset_date = self.storage.get_last_reset_date()
+
+        if today != last_reset_date:
+            logger.info(
+                f"First startup/wake of the day detected. Today: {today}, Last reset: {last_reset_date}"
+            )
+
+            # Check if there are any sessions from today
+            c = self.storage.conn.cursor()
+            today_start = datetime.datetime.combine(
+                datetime.date.today(), datetime.time.min
+            ).timestamp()
+
+            c.execute(
+                "SELECT COUNT(*) FROM sessions WHERE start_time >= ?", (today_start,)
+            )
+            today_sessions_count = c.fetchone()[0]
+
+            if today_sessions_count == 0:
+                logger.info("No sessions from today found. Performing daily reset.")
+                await self.perform_daily_reset()
+            else:
+                logger.info(
+                    f"Found {today_sessions_count} sessions from today. Skipping reset."
+                )
+        else:
+            logger.debug(f"Reset already performed today ({today})")
+
+    async def check_usage_summarize(self, username, used_time, quota_reached=False):
+        """
+        Check if we need to summarize usage and add to history.
+        This should be called when:
+        1. The user reaches their daily quota
+        2. The user logs out and it's their last session of the day
+
+        Args:
+            username (str): Username to check
+            used_time (float): Used time in seconds
+            quota_reached (bool): Whether the quota was reached
+        """
+        # If quota is reached, immediately summarize and move to history
+        if quota_reached:
+            today = datetime.date.today().strftime("%Y-%m-%d")
+
+            # Summarize sessions for this user
+            summary = self.storage.summarize_user_sessions(username, today)
+            summary["quota_exceeded"] = True
+
+            # Save to history
+            self.storage.save_history_entry(summary)
+
+            logger.info(
+                f"User {username} reached quota. Added summary to history: {summary['total_screen_time']/60:.1f} minutes used."
+            )
+
+            # We don't clean up sessions yet as the day isn't over
+            # We'll do that during the next daily reset
 
 
 class GuardianDaemonInterface(ServiceInterface):
