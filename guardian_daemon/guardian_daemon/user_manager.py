@@ -9,7 +9,6 @@ import os
 import pwd
 import shutil
 import subprocess
-import time
 from pathlib import Path
 
 from guardian_daemon.logging import get_logger
@@ -92,661 +91,149 @@ class UserManager:
 
     def ensure_pam_time_module(self):
         """
-        Ensure that the pam_time.so module is properly configured in PAM services.
+        Ensures pam_time.so is active by creating and selecting a custom authselect profile.
+        This method is designed to be safe and idempotent.
         """
-        # Core PAM services that need to be configured
-        PAM_SERVICES = [
-            "sddm",
-            "login",
-            "kde",
-            "lightdm",
-            "gdm",
-            "xdm",
-        ]
+        if not shutil.which("authselect"):
+            logger.error("authselect command not found. This system is not supported.")
+            return
 
-        # Services potentially managed by authselect
-        AUTHSELECT_SERVICES = ["system-auth", "password-auth"]
+        guardian_profile_name = "guardian"
+        custom_profile_path = Path(f"/etc/authselect/custom/{guardian_profile_name}")
 
-        # Additional services to check for (but not create if they don't exist)
-        OPTIONAL_SERVICES = ["common-account", "common-auth", "common-session"]
-
-        # Check if we have authselect available on this system
-        authselect_available = False
         try:
-            result = subprocess.run(
-                ["which", "authselect"], check=False, capture_output=True, text=True
-            )
-            authselect_available = result.returncode == 0
-            if authselect_available:
-                logger.info("authselect detected - will use it for PAM configuration")
-        except Exception:
-            logger.debug("authselect not available")
-
-        # First handle authselect-managed services if available
-        if authselect_available:
+            # 1. Determine the current base profile and its features
+            current_profile_name = "local"  # Default to 'local'
+            current_features = []
             try:
-                # Determine current profile
-                current_profile = None
-                try:
-                    result = subprocess.run(
-                        ["authselect", "current"],
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    )
-                    current_profile = result.stdout.strip().split("\n")[0]
-                    logger.info(f"Current authselect profile: {current_profile}")
-                except Exception as e:
-                    logger.warning(
-                        f"Could not determine current authselect profile: {e}"
-                    )
+                result = subprocess.run(
+                    ["authselect", "current"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                lines = result.stdout.strip().split("\n")
+                # Profile ID: custom/guardian or Profile ID: local
+                profile_line = lines[0]
+                if "custom/" in profile_line:
+                    # If we are already on a custom profile, treat its base as the current one
+                    # This is a simplification; we'll base our profile on a known-good one.
+                    # For now, we'll stick to 'local' as the safe base.
+                    pass
+                else:
+                    current_profile_name = profile_line.split(":")[1].strip()
 
-                # Check if we need to modify authselect configuration
-                auth_files_need_update = False
-                for service in AUTHSELECT_SERVICES:
-                    service_file = Path(f"/etc/pam.d/{service}")
-                    if not service_file.exists():
+                # Extract features
+                in_features_section = False
+                for line in lines[1:]:
+                    if "Aktivierte Funktionen:" in line or "Enabled features:" in line:
+                        in_features_section = True
                         continue
+                    if in_features_section and line.strip().startswith("-"):
+                        feature = line.strip().replace("-", "").strip()
+                        if feature:
+                            current_features.append(f"with-{feature}")
+                logger.info(
+                    f"Detected base profile '{current_profile_name}' with features: {current_features}"
+                )
 
-                    with open(service_file, "r") as f:
-                        content = f.read()
-                    if "pam_time.so" not in content:
-                        auth_files_need_update = True
-                        break
-
-                if auth_files_need_update:
-                    # Method 1: Direct file modification (most reliable but gets overwritten)
-                    # This is a temporary fix that will be overwritten on next authselect run
-                    for service in AUTHSELECT_SERVICES:
-                        service_file = Path(f"/etc/pam.d/{service}")
-                        if not service_file.exists():
-                            continue
-
-                        with open(service_file, "r") as f:
-                            lines = f.readlines()
-
-                        # Find the account section and add our rule after it
-                        account_lines = []
-                        for i, line in enumerate(lines):
-                            if line.strip().startswith(
-                                "account"
-                            ) and not line.strip().startswith("#"):
-                                account_lines.append(i)
-
-                        if account_lines:
-                            insert_pos = max(account_lines) + 1
-                            # Make backup
-                            shutil.copy(
-                                service_file,
-                                service_file.with_suffix(f".bak-{int(time.time())}"),
-                            )
-
-                            # Add our line
-                            lines.insert(
-                                insert_pos, "account    required    pam_time.so\n"
-                            )
-                            with open(service_file, "w") as f:
-                                f.writelines(lines)
-                            logger.info(
-                                f"Added pam_time.so to {service_file} (temporary)"
-                            )
-
-                    # Method 2: Handle Local profile by creating a custom profile based on it
-                    try:
-                        # Check if we're using the local profile
-                        is_local_profile = False
-                        if current_profile and "local" in current_profile.lower():
-                            is_local_profile = True
-                            logger.info(
-                                "Detected Local authselect profile - will create custom copy"
-                            )
-
-                        if is_local_profile:
-                            # Create a guardian-local profile based on the Local profile
-                            guardian_profile_name = "guardian-local"
-                            custom_profile_path = Path(
-                                f"/etc/authselect/custom/{guardian_profile_name}"
-                            )
-                            local_profile_path = Path("/etc/authselect/local")
-
-                            # Create/recreate the custom profile to stay in sync with Local profile
-                            try:
-                                # First, check if we need to recreate the profile to sync with Local
-                                need_recreation = False
-
-                                # If the profile doesn't exist, we definitely need to create it
-                                if not custom_profile_path.exists():
-                                    need_recreation = True
-                                    logger.info(
-                                        f"Custom profile {guardian_profile_name} doesn't exist, will create it"
-                                    )
-                                else:
-                                    # Check if Local profile has been updated by comparing files
-                                    logger.info(
-                                        "Checking if Local profile has been updated..."
-                                    )
-
-                                    # Check for differences in key files
-                                    for service in AUTHSELECT_SERVICES:
-                                        local_file = local_profile_path / service
-                                        custom_file = custom_profile_path / service
-
-                                        if not local_file.exists():
-                                            continue
-
-                                        if not custom_file.exists():
-                                            need_recreation = True
-                                            break
-
-                                        # Compare files excluding our pam_time.so line
-                                        try:
-                                            with open(local_file, "r") as f:
-                                                local_content = f.read()
-
-                                            with open(custom_file, "r") as f:
-                                                custom_content = f.read()
-
-                                            # Remove any pam_time.so lines from the custom content for comparison
-                                            custom_lines = custom_content.split("\n")
-                                            custom_lines = [
-                                                line
-                                                for line in custom_lines
-                                                if "pam_time.so" not in line
-                                            ]
-                                            filtered_custom_content = "\n".join(
-                                                custom_lines
-                                            )
-
-                                            # If the content is different, we need to recreate
-                                            if (
-                                                local_content.strip()
-                                                != filtered_custom_content.strip()
-                                            ):
-                                                need_recreation = True
-                                                logger.info(
-                                                    f"Local profile {service} has changed, will recreate guardian-local"
-                                                )
-                                                break
-                                        except Exception as e:
-                                            logger.warning(
-                                                f"Error comparing profile files: {e}"
-                                            )
-                                            # Be safe and recreate if comparison fails
-                                            need_recreation = True
-                                            break
-
-                                if need_recreation:
-                                    # Backup any existing custom profile
-                                    if custom_profile_path.exists():
-                                        backup_path = Path(
-                                            f"/etc/authselect/custom/{guardian_profile_name}.bak-{int(time.time())}"
-                                        )
-                                        try:
-                                            shutil.copytree(
-                                                custom_profile_path, backup_path
-                                            )
-                                            logger.info(
-                                                f"Backed up existing profile to {backup_path}"
-                                            )
-                                        except Exception as e:
-                                            logger.warning(
-                                                f"Failed to backup existing profile: {e}"
-                                            )
-
-                                    # Force recreation
-                                    subprocess.run(
-                                        [
-                                            "authselect",
-                                            "create-profile",
-                                            guardian_profile_name,
-                                            "--base-on=local",
-                                            "--force",
-                                        ],
-                                        check=True,
-                                        capture_output=True,
-                                        text=True,
-                                    )
-                                    logger.info(
-                                        f"Created/updated custom profile {guardian_profile_name} based on current local profile"
-                                    )
-                                else:
-                                    logger.info(
-                                        f"Custom profile {guardian_profile_name} exists and is up to date with Local profile"
-                                    )
-                            except subprocess.CalledProcessError as e:
-                                logger.error(
-                                    f"Failed to create custom profile: {e.stderr}"
-                                )
-                                raise
-
-                            # Modify the profile files to add pam_time.so
-                            for service in AUTHSELECT_SERVICES:
-                                profile_file = custom_profile_path / service
-
-                                if profile_file.exists():
-                                    # Read the current content
-                                    with open(profile_file, "r") as f:
-                                        content = f.read()
-
-                                    # Check if pam_time.so already exists
-                                    if "pam_time.so" in content:
-                                        logger.info(
-                                            f"Custom profile {service} already contains pam_time.so"
-                                        )
-                                        continue
-
-                                    # Add the pam_time.so module after account modules
-                                    lines = content.split("\n")
-                                    account_lines = [
-                                        i
-                                        for i, line in enumerate(lines)
-                                        if line.strip().startswith("account")
-                                        and not line.strip().startswith("#")
-                                    ]
-
-                                    if account_lines:
-                                        # Insert after the last account line
-                                        insert_pos = max(account_lines) + 1
-                                        lines.insert(
-                                            insert_pos,
-                                            "account    required    pam_time.so",
-                                        )
-
-                                        # Write the updated content
-                                        with open(profile_file, "w") as f:
-                                            f.write("\n".join(lines))
-
-                                        logger.info(
-                                            f"Added pam_time.so to custom profile {service}"
-                                        )
-                                    else:
-                                        # No account section found, append it
-                                        with open(profile_file, "a") as f:
-                                            f.write(
-                                                "\n# Added by Guardian for time restrictions\n"
-                                            )
-                                            f.write(
-                                                "account    required    pam_time.so\n"
-                                            )
-                                        logger.info(
-                                            f"Appended pam_time.so to custom profile {service}"
-                                        )
-
-                                        # Select the custom profile
-                            try:
-                                # Get current features if any
-                                current_features = []
-                                try:
-                                    # Try getting the features with the more reliable "current" command
-                                    result = subprocess.run(
-                                        ["authselect", "current"],
-                                        check=True,
-                                        capture_output=True,
-                                        text=True,
-                                    )
-
-                                    # Parse the output which is in a more human-readable format
-                                    lines = result.stdout.strip().split("\n")
-                                    feature_section = False
-
-                                    for line in lines:
-                                        # Skip the first line which is the profile ID
-                                        if (
-                                            "Profil ID:" in line
-                                            or "Profile ID:" in line
-                                        ):
-                                            continue
-
-                                        # Detect the feature section header
-                                        if (
-                                            "Aktivierte Funktionen:" in line
-                                            or "Enabled features:" in line
-                                        ):
-                                            feature_section = True
-                                            continue
-
-                                        # Once in the feature section, collect features
-                                        if (
-                                            feature_section
-                                            and line.strip()
-                                            and "- " in line
-                                        ):
-                                            feature = line.strip().replace("- ", "")
-                                            if feature:
-                                                # Store the feature name without the "with-" prefix
-                                                # It will be added back when constructing the command
-                                                if feature.startswith("with-"):
-                                                    current_features.append(feature)
-                                                else:
-                                                    current_features.append(feature)
-
-                                    logger.info(
-                                        f"Detected features to preserve: {current_features}"
-                                    )
-                                except Exception as e:
-                                    # Fallback to the raw method
-                                    logger.warning(
-                                        f"Failed to get features from current command: {e}"
-                                    )
-                                    try:
-                                        profile_info = subprocess.run(
-                                            ["authselect", "current", "--raw"],
-                                            check=True,
-                                            capture_output=True,
-                                            text=True,
-                                        ).stdout.strip()
-
-                                        if "with-" in profile_info:
-                                            for line in profile_info.split("\n"):
-                                                if line.strip().startswith("with-"):
-                                                    current_features.append(
-                                                        line.strip()
-                                                    )
-                                    except Exception:
-                                        logger.warning(
-                                            "Could not determine current authselect features"
-                                        )
-
-                                # Select our custom profile with the same features as the current profile
-                                cmd = [
-                                    "authselect",
-                                    "select",
-                                    f"custom/{guardian_profile_name}",
-                                ]
-                                if current_features:
-                                    # Log the features we're preserving
-                                    logger.info(
-                                        f"Preserving features: {', '.join(current_features)}"
-                                    )
-
-                                    # Make sure each feature has the with- prefix
-                                    for feature in current_features:
-                                        # Check if feature already has the with- prefix
-                                        if feature.startswith("with-"):
-                                            cmd.append(feature)
-                                        else:
-                                            cmd.append(f"with-{feature}")
-                                cmd.append("--force")
-
-                                # Log the exact command for debugging
-                                logger.info(f"Running command: {' '.join(cmd)}")
-
-                                subprocess.run(
-                                    cmd, check=True, capture_output=True, text=True
-                                )
-                                logger.info(
-                                    f"Selected custom profile {guardian_profile_name} with pam_time.so and preserved features"
-                                )
-                            except subprocess.CalledProcessError as e:
-                                logger.error(
-                                    f"Failed to select custom profile: {e.stderr}"
-                                )
-                                raise
-
-                        else:
-                            # Create a custom profile based on the current one
-                            current_base = "sssd"  # Default base
-                            if current_profile:
-                                # Try to determine the actual base
-                                if "/" in current_profile:
-                                    parts = current_profile.split("/")
-                                    if len(parts) > 1 and parts[0] != "custom":
-                                        current_base = parts[0]
-                                else:
-                                    current_base = current_profile.split()[0]
-
-                            # Get current features
-                            current_features = []
-                            try:
-                                profile_info = subprocess.run(
-                                    ["authselect", "current", "--raw"],
-                                    check=True,
-                                    capture_output=True,
-                                    text=True,
-                                ).stdout.strip()
-
-                                if "with-" in profile_info:
-                                    # Extract feature names
-                                    for line in profile_info.split("\n"):
-                                        if line.strip().startswith("with-"):
-                                            current_features.append(line.strip())
-                            except Exception:
-                                logger.warning(
-                                    "Could not determine current authselect features"
-                                )
-
-                            # Create guardian-time custom feature
-                            custom_feature_dir = Path(
-                                "/etc/authselect/custom-features/guardian-time"
-                            )
-                            custom_feature_dir.mkdir(parents=True, exist_ok=True)
-
-                            # Create feature files for system-auth and password-auth
-                            for service in AUTHSELECT_SERVICES:
-                                with open(custom_feature_dir / service, "w") as f:
-                                    f.write("account    required    pam_time.so\n")
-
-                            # Create README
-                            with open(custom_feature_dir / "README", "w") as f:
-                                f.write(
-                                    "Guardian time restriction feature for parental controls\n"
-                                )
-
-                            # Create a guardian profile if we're not already using custom
-                            if not current_profile or not current_profile.startswith(
-                                "custom/"
-                            ):
-                                subprocess.run(
-                                    [
-                                        "authselect",
-                                        "create-profile",
-                                        "guardian",
-                                        f"--base-on={current_base}",
-                                    ],
-                                    check=True,
-                                    capture_output=True,
-                                    text=True,
-                                )
-                                logger.info(
-                                    f"Created custom guardian profile based on {current_base}"
-                                )
-
-                                # Select the custom profile with our feature
-                                cmd = [
-                                    "authselect",
-                                    "select",
-                                    "custom/guardian",
-                                    "with-guardian-time",
-                                ]
-                                cmd.extend(current_features)
-                                cmd.append("--force")
-
-                                subprocess.run(
-                                    cmd, check=True, capture_output=True, text=True
-                                )
-                                logger.info(
-                                    "Applied custom guardian profile with pam_time.so feature"
-                                )
-                            else:
-                                # Just enable our feature on the existing custom profile
-                                cmd = [
-                                    "authselect",
-                                    "select",
-                                    current_profile,
-                                    "with-guardian-time",
-                                ]
-                                if current_features:
-                                    cmd.extend(current_features)
-                                cmd.append("--force")
-
-                                subprocess.run(
-                                    cmd, check=True, capture_output=True, text=True
-                                )
-                                logger.info(
-                                    f"Added guardian-time feature to existing {current_profile}"
-                                )
-                    except Exception as e:
-                        logger.warning(f"Failed to configure authselect: {e}")
-
-                        # Fallback to direct file modification as a last resort
-                        try:
-                            for service in AUTHSELECT_SERVICES:
-                                service_file = Path(f"/etc/pam.d/{service}")
-                                if service_file.exists():
-                                    # Take extra precautions - use a persistent file
-                                    guardian_pam_file = Path(
-                                        f"/etc/pam.d/guardian-{service}-time"
-                                    )
-                                    with open(guardian_pam_file, "w") as f:
-                                        f.write(
-                                            "# Guardian time restrictions - DO NOT REMOVE\n"
-                                        )
-                                        f.write("account    required    pam_time.so\n")
-                                    logger.info(
-                                        f"Created persistent rule file {guardian_pam_file}"
-                                    )
-
-                                    # Try to add include to the main file
-                                    with open(service_file, "r") as f:
-                                        lines = f.readlines()
-
-                                    # Find a suitable position after any account line
-                                    account_lines = [
-                                        i
-                                        for i, line in enumerate(lines)
-                                        if line.strip().startswith("account")
-                                        and not line.strip().startswith("#")
-                                    ]
-
-                                    if account_lines:
-                                        insert_pos = max(account_lines) + 1
-                                        include_line = (
-                                            f"@include guardian-{service}-time\n"
-                                        )
-
-                                        # Only add if not already there
-                                        if include_line not in "".join(lines):
-                                            lines.insert(insert_pos, include_line)
-
-                                            with open(service_file, "w") as f:
-                                                f.writelines(lines)
-                                            logger.info(
-                                                f"Added include to {service_file}"
-                                            )
-
-                            logger.info(
-                                "Applied persistent PAM time module through include files"
-                            )
-                        except Exception as fallback_error:
-                            logger.error(
-                                f"All authselect methods failed: {fallback_error}"
-                            )
-
-                    logger.info(
-                        "Applied authselect custom profile with pam_time.so configuration"
-                    )
             except Exception as e:
-                logger.error(f"Failed to configure authselect: {e}")
+                logger.warning(
+                    f"Could not reliably determine current authselect profile, defaulting to 'local'. Error: {e}"
+                )
 
-        # Then handle core PAM services - create files if needed
-        for service in PAM_SERVICES:
-            service_file = Path(f"/etc/pam.d/{service}")
-            if not service_file.exists():
-                continue
+            # 2. Create the custom 'guardian' profile if it doesn't exist.
+            if not custom_profile_path.exists():
+                logger.info(
+                    f"Creating new custom authselect profile '{guardian_profile_name}' based on '{current_profile_name}'."
+                )
+                subprocess.run(
+                    [
+                        "authselect",
+                        "create-profile",
+                        guardian_profile_name,
+                        "-b",
+                        current_profile_name,
+                        "--symlink-meta",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
 
-            try:
-                with open(service_file, "r") as f:
-                    content = f.read()
+            # 3. Add pam_time.so to the account stack in the custom profile's system-auth.
+            # We only need to modify system-auth, as password-auth typically includes it.
+            system_auth_path = custom_profile_path / "system-auth"
+            if not system_auth_path.exists():
+                logger.error(f"Custom profile is broken. Missing {system_auth_path}")
+                return
 
-                # Check if the file is managed by authselect
-                is_managed_by_authselect = "Generated by authselect" in content
-
-                if is_managed_by_authselect:
-                    logger.info(
-                        f"Skipping {service_file} as it's managed by authselect"
+            with open(system_auth_path, "r+") as f:
+                lines = f.readlines()
+                # Check if our line is already present
+                if any("pam_time.so" in line for line in lines):
+                    logger.debug(
+                        "pam_time.so is already in the custom profile's system-auth."
                     )
-                    continue
+                else:
+                    # Find the last 'account' line and insert after it
+                    last_account_line_index = -1
+                    for i, line in enumerate(lines):
+                        if line.strip().startswith("account"):
+                            last_account_line_index = i
 
-                if "pam_time.so" not in content:
-                    # Make a backup of the original file
-                    backup_file = service_file.with_suffix(f".bak-{int(time.time())}")
-                    shutil.copy(service_file, backup_file)
-
-                    # Find the account section and add pam_time.so
-                    lines = content.split("\n")
-                    account_section = [
-                        i
-                        for i, line in enumerate(lines)
-                        if line.strip().startswith("account")
-                        and not line.strip().startswith("#")
-                    ]
-
-                    if account_section:
-                        # Insert after the last account line
-                        insert_pos = max(account_section) + 1
-                        lines.insert(insert_pos, "account    required    pam_time.so")
-
-                        # Write the updated file
-                        with open(service_file, "w") as f:
-                            f.write("\n".join(lines))
-
-                        logger.info(f"Added pam_time.so module to {service_file}")
-                    else:
-                        logger.warning(
-                            f"Could not find account section in {service_file}"
+                    if last_account_line_index != -1:
+                        lines.insert(
+                            last_account_line_index + 1,
+                            "account     required      pam_time.so\n",
                         )
-            except Exception as e:
-                logger.error(f"Failed to update PAM configuration for {service}: {e}")
-
-        # Now handle optional services - only modify if they already exist
-        for service in OPTIONAL_SERVICES:
-            service_file = Path(f"/etc/pam.d/{service}")
-            if not service_file.exists():
-                logger.debug(
-                    f"Optional PAM service file {service} does not exist, skipping"
-                )
-                continue
-
-            try:
-                with open(service_file, "r") as f:
-                    content = f.read()
-
-                if "pam_time.so" not in content:
-                    # Make a backup of the original file
-                    backup_file = service_file.with_suffix(f".bak-{int(time.time())}")
-                    shutil.copy(service_file, backup_file)
-
-                    # For optional files, just append to end if we can't find account section
-                    lines = content.split("\n")
-                    account_section = [
-                        i
-                        for i, line in enumerate(lines)
-                        if line.strip().startswith("account")
-                        and not line.strip().startswith("#")
-                    ]
-
-                    if account_section:
-                        # Insert after the last account line
-                        insert_pos = max(account_section) + 1
-                        lines.insert(insert_pos, "account    required    pam_time.so")
+                        f.seek(0)
+                        f.writelines(lines)
+                        f.truncate()
+                        logger.info(
+                            "Added pam_time.so to custom profile's system-auth."
+                        )
                     else:
-                        # Just append to the end
-                        lines.append("# Added by guardian-daemon")
-                        lines.append("account    required    pam_time.so")
+                        logger.error(
+                            "Could not find 'account' section in custom profile's system-auth."
+                        )
+                        return
 
-                    # Write the updated file
-                    with open(service_file, "w") as f:
-                        f.write("\n".join(lines))
+            # 4. Select the custom profile with all original features.
+            logger.info(
+                f"Selecting 'custom/{guardian_profile_name}' profile with features."
+            )
+            select_cmd = [
+                "authselect",
+                "select",
+                f"custom/{guardian_profile_name}",
+            ] + current_features
+            result = subprocess.run(
+                select_cmd, check=False, capture_output=True, text=True
+            )
 
-                    logger.info(
-                        f"Added pam_time.so module to optional service {service_file}"
-                    )
-            except Exception as e:
-                logger.error(
-                    f"Failed to update optional PAM configuration for {service}: {e}"
+            if result.returncode != 0:
+                # If selection fails, try with --force. This is sometimes needed.
+                logger.warning(
+                    "Initial authselect command failed, retrying with --force."
                 )
+                select_cmd.append("--force")
+                subprocess.run(select_cmd, check=True, capture_output=True, text=True)
 
-        logger.info("PAM time module configuration checked")
+            logger.info(
+                "Successfully selected and applied the custom guardian authselect profile."
+            )
+
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            logger.error(
+                f"Failed to configure authselect: {e.stderr if hasattr(e, 'stderr') else e}"
+            )
+            logger.error("PAM time restrictions will NOT be active.")
+        except Exception as e:
+            logger.error(
+                f"An unexpected error occurred during authselect configuration: {e}"
+            )
+            logger.error("PAM time restrictions will NOT be active.")
 
     def setup_dbus_policy(self):
         """
@@ -866,83 +353,55 @@ class UserManager:
 
     def _generate_rules(self):
         """
-        Generates the PAM time rules from the policy
+        Generates the PAM time rules from the policy.
+        The default behavior of pam_time.so is to deny access if no rule matches.
+        Therefore, we must create a rule to explicitly ALLOW non-managed users.
         """
         rules = []
         users = self.policy.data.get("users", {})
+        managed_users = list(users.keys())
 
-        # Get the current username to ensure we don't lock out the admin
-        current_username = None
-        try:
-            import os
+        # Rule 1: Allow all users who are NOT in the 'kids' group at all times.
+        # The '!@group' syntax refers to users not in a local group.
+        # This is much more robust than listing individual users.
+        if managed_users:
+            rules.append("*;*;!@kids;Al0000-2400")
+            rules.append("# --- Guardian Managed Rules Below ---")
 
-            current_username = (
-                os.getenv("SUDO_USER")
-                or os.getenv("USER")
-                or pwd.getpwuid(os.getuid()).pw_name
-            )
-            logger.info(f"Current username detected as {current_username}")
-        except Exception as e:
-            logger.warning(f"Could not determine current username: {e}")
+        # Rule 2: Define specific time restrictions for each managed user.
+        services_to_restrict = ["login", "sddm", "gdm", "lightdm", "xdm", "kde", "sudo"]
+        day_mapping = {
+            "weekdays": "Wk",
+            "saturday": "Sa",
+            "sunday": "Su",
+            "all": "Al",
+        }
 
-        # Add a critical safety mechanism - PAM time rules work by default-deny
-        # We need to explicitly allow ALL non-managed users for ALL services at ALL times
-
-        # List of services to protect with time rules
-        services = ["login", "sddm", "gdm", "lightdm", "xdm", "kde", "sudo"]
-
-        # First, add explicit ALLOW rules for all non-managed users
-        rules.append("# Default allow for all non-managed users")
-        for service in services:
-            # The special syntax !users|user1|user2... means "NOT these users" (i.e., all other users)
-            # This creates an allowance rule for all users EXCEPT those in our managed list
-            managed_users_str = "|".join(users.keys())
-            if managed_users_str:  # Only add if we have managed users
-                rules.append(f"{service};*;!{managed_users_str};Al;Al")
-
-        # Additional safety: add explicit rules for specific important users
-        rules.append("# Explicit allow for important system users")
-        rules.append("sudo;*;root;Al;Al")  # root can always use sudo
-
-        # If we detected the current admin user, ensure they're not restricted
-        if current_username:
-            # Allow the admin user on all services
-            for service in services:
-                rules.append(f"{service};*;{current_username};Al;Al")
-            rules.append(
-                f"# Ensuring admin user {current_username} always has access"
-            )  # List of services to protect with time rules
-        services = ["login", "sddm", "gdm", "lightdm", "xdm", "kde"]
-
-        for username, user_policy in users.items():
-            # Skip applying restrictions to the current admin user for all services
-            if current_username and username == current_username:
-                logger.info(f"Skipping time restrictions for admin user {username}")
-                continue
-
+        for username in managed_users:
+            user_policy = self.policy.get_user_policy(username)
             curfew = user_policy.get("curfew", self.policy.get_default("curfew"))
-            # Beispiel: weekdays: "08:00-20:00"
+
             if curfew:
-                # 1. First, add EXPLICIT DENY rules using negation - these are stronger
+                # Create a combined day specification for all allowed times.
+                # Example: Wk0800-2000&Sa0900-2200&Su0900-2000
+                time_specs = []
+                for day, time_range in curfew.items():
+                    day_code = day_mapping.get(day)
+                    if day_code:
+                        # Convert "08:00-20:00" to "0800-2000"
+                        start, end = time_range.split("-")
+                        start = start.replace(":", "")
+                        end = end.replace(":", "")
+                        time_specs.append(f"{day_code}{start}-{end}")
 
-                # Map day strings to standard formats
-                day_mapping = {
-                    "weekdays": "Mo|Tu|We|Th|Fr",
-                    "saturday": "Sa",
-                    "sunday": "Su",
-                    "all": "Al",
-                }
+                if time_specs:
+                    # Apply the combined rule to all relevant services for the user
+                    combined_times = "&".join(time_specs)
+                    services_spec = "&".join(services_to_restrict)
+                    rules.append(f"{services_spec};*;{username};{combined_times}")
 
-                # For each service, create comprehensive rules
-                for service in services:
-                    for day, times in curfew.items():
-                        # First, allow during allowed hours
-                        standard_day = day_mapping.get(day, day)
-                        rules.append(f"{service};*;{username};{standard_day};{times}")
-
-                        # Then explicitly deny outside those hours on the same days
-                        # This negation pattern is important: !times means EXCEPT during times
-                        rules.append(f"{service};*;{username};{standard_day};!{times}")
+        logger.debug(f"Generated {len(rules)} PAM time rules.")
+        return rules
 
         logger.debug(f"Generated {len(rules)} PAM time rules.")
         return rules
