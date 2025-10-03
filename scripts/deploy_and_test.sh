@@ -26,7 +26,13 @@ fi
 
 echo "--- Starting Deployment to $TEST_HOST ---"
 
-# --- Step 1: Git Push ---
+# --- Step 1: Git Commit and Push ---
+if [ -n "$1" ]; then
+    echo "Committing changes with message: $1"
+    git add .
+    git commit -m "$1"
+fi
+
 # Ensure the current branch is pushed to the 'origin' remote.
 # The remote machine is expected to have 'origin' pointing to this repository.
 echo "Pushing latest changes to origin..."
