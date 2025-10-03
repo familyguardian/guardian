@@ -130,7 +130,7 @@ class UserManager:
                         in_features_section = True
                         continue
                     if in_features_section and line.strip().startswith("-"):
-                        feature = line.strip().replace("-", "").strip()
+                        feature = line.strip().lstrip("-").strip()
                         if feature:
                             current_features.append(feature)
                 logger.info(
