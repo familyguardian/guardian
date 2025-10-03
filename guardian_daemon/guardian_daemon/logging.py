@@ -54,15 +54,5 @@ def setup_logging(config):
 def get_logger(name):
     """
     Returns a configured structlog logger instance.
-    Ensures that setup_logging() has been called before returning a logger.
     """
-    if not _logging_configured:
-        # Fallback to basic logging if not configured. This shouldn't happen in normal operation.
-        logging.basicConfig(level=logging.INFO)
-        log = structlog.get_logger("unconfigured_logger")
-        log.warning(
-            "Logging was not configured before get_logger was called. Using basic config."
-        )
-        return log
-
     return structlog.get_logger(name)

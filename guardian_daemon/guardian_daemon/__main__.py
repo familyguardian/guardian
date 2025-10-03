@@ -137,7 +137,7 @@ def main():
     """
     try:
         config = Config()
-        setup_logging(config)  # Setup logging once with the loaded config
+        setup_logging(config.data)  # Setup logging once with the loaded config
         daemon = GuardianDaemon(config)
         asyncio.run(daemon.run())
     except ConfigError as e:
