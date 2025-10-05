@@ -602,13 +602,25 @@ class UserManager:
                     # Create the default.target.wants directory if it doesn't exist
                     default_target_dir = user_systemd_path / "default.target.wants"
                     symlink_path = default_target_dir / "guardian_agent.service"
+                    logger.info(
+                        f"Service file path: {service_file_path}, exists: {service_file_path.exists()}"
+                    )
+                    logger.info(
+                        f"Default target dir: {default_target_dir}, exists: {default_target_dir.exists()}"
+                    )
+                    logger.info(
+                        f"Symlink path: {symlink_path}, exists: {symlink_path.exists()}"
+                    )
 
                     if not default_target_dir.exists():
-                        logger.debug(
+                        logger.info(
                             f"Creating default.target.wants directory for {username}"
                         )
                         default_target_dir.mkdir(mode=0o755, exist_ok=True)
                         os.chown(default_target_dir, user_info.pw_uid, user_info.pw_gid)
+                        logger.info(
+                            f"Created directory {default_target_dir}, exists: {default_target_dir.exists()}"
+                        )
 
                     # Create the symlink if it doesn't exist
                     if service_file_path.exists() and not symlink_path.exists():
@@ -726,9 +738,12 @@ class UserManager:
 
                 # Create necessary directories if they don't exist
                 if not service_dir.exists():
-                    logger.debug(f"Creating systemd user directory for {username}")
+                    logger.info(f"Creating systemd user directory for {username}")
                     service_dir.mkdir(parents=True, exist_ok=True)
                     chown_recursive(service_dir, user_info.pw_uid, user_info.pw_gid)
+                    logger.info(
+                        f"Created service dir {service_dir}, exists: {service_dir.exists()}"
+                    )
 
                 # Ensure the service file exists
                 if not service_file.exists() and SOURCE_SERVICE_FILE.exists():
