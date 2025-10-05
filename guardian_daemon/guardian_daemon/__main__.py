@@ -61,6 +61,8 @@ class GuardianDaemon:
             if new_hash != old_hash:
                 logger.info("Config changed, updating timers and UserManager rules.")
                 self.usermanager = UserManager(self.policy)
+                # Clean up any existing duplicates in time.conf before writing new rules
+                self.usermanager._cleanup_time_conf()
                 self.usermanager.write_time_rules()
                 reset_time = self.policy.data.get("reset_time", "03:00")
                 self.systemd.create_daily_reset_timer(reset_time)

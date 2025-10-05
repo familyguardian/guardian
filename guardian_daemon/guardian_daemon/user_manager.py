@@ -143,9 +143,23 @@ class UserManager:
 
     def ensure_pam_time_module(self):
         """
-        Ensures pam_time.so is active by creating and selecting a custom authselect profile.
-        This method is designed to be safe and idempotent.
+        Ensures pam_time.so is active using two complementary approaches:
+
+        1. Creates a custom authselect profile with pam_time.so in the system-auth
+           stack (applies to all PAM services that include system-auth)
+
+        2. Directly modifies /etc/pam.d/sddm to explicitly include pam_time.so
+           before the system-account include (ensuring SDDM enforces time restrictions
+           even if authselect updates the system files)
+
+        This dual approach ensures maximum compatibility and resilience against
+        system updates or configuration changes.
         """
+        # First, directly modify SDDM's PAM config (safe from authselect overwrites)
+        # This is the most reliable way to ensure SDDM enforces login time restrictions
+        self._ensure_sddm_pam_time()
+
+        # Also set up the authselect profile for system-wide consistency
         if not shutil.which("authselect"):
             logger.error("authselect command not found. This system is not supported.")
             return
@@ -351,64 +365,279 @@ class UserManager:
         """
         Updates the time rules for all children according to the policy in /etc/security/time.conf,
         without overwriting foreign rules.
+
+        This method:
+        1. First checks if the file is excessively large and needs cleanup
+        2. Compares existing content with what we need to write
+        3. Only writes if content needs updating
         """
-        # Ensure the PAM time module is loaded in the relevant PAM services
-        self.ensure_pam_time_module()
-
-        rules = self._generate_rules()
-        managed_usernames = set(self.policy.data.get("users", {}).keys())
-
-        new_lines = ["# Managed by guardian-daemon"]
-        if TIME_CONF_PATH.exists():
-            with open(TIME_CONF_PATH, "r") as f:
-                lines = f.readlines()
-
-            for line in lines:
-                line = line.strip()
-                if not line or line.startswith("# Managed by guardian-daemon"):
-                    continue
-
-                try:
-                    parts = line.strip().split(";")
-                    # Check if the rule is for a user we manage
-                    if len(parts) >= 3 and parts[2] in managed_usernames:
-                        logger.debug(f"Removing old rule for managed user: {parts[2]}")
-                        continue
-                except Exception:
-                    # Keep lines that don't parse correctly
-                    pass
-
-                new_lines.append(line)
-        else:
-            logger.debug("No existing time.conf found, starting fresh.")
-
-        new_lines.extend(rules)
-
         try:
-            with open(TIME_CONF_PATH, "w") as f:
-                for line in new_lines:
-                    f.write(line + "\n")
-            os.chmod(TIME_CONF_PATH, 0o644)
-            logger.info(f"Wrote {len(rules)} managed rules to {TIME_CONF_PATH}")
+            # Ensure the PAM time module is loaded in the relevant PAM services
+            # This now also ensures SDDM PAM configuration includes pam_time.so explicitly
+            self.ensure_pam_time_module()
 
-            # Reload PAM configuration if the system supports it
-            try:
-                # Check if systemd-reload-pam exists
-                result = subprocess.run(
-                    ["which", "systemd-reload-pam"],
-                    check=False,
-                    capture_output=True,
-                    text=True,
+            # Check if the file exists and analyze its size/content
+            if TIME_CONF_PATH.exists():
+                file_size = TIME_CONF_PATH.stat().st_size
+                if file_size == 0:
+                    # Empty file, we'll just write fresh content
+                    logger.info(f"{TIME_CONF_PATH} is empty, will write fresh content")
+                elif (
+                    file_size > 10000
+                ):  # If file is over 10KB, it likely has duplicates
+                    logger.warning(
+                        f"time.conf is large ({file_size} bytes), likely contains duplicates. Will clean up."
+                    )
+                    self._cleanup_time_conf()
+
+            # Generate the rules we need to enforce
+            rules = self._generate_rules()
+            managed_usernames = set(self.policy.data.get("users", {}).keys())
+
+            # Generate the content we want to have in the file
+            desired_content = ["# Managed by guardian-daemon"]
+            preserved_lines = []
+            existing_rules = set()
+
+            # Extract any non-Guardian content to preserve
+            if TIME_CONF_PATH.exists():
+                try:
+                    with open(TIME_CONF_PATH, "r") as f:
+                        lines = f.readlines()
+
+                    # Extract existing Guardian rules and preserved content
+                    for line in lines:
+                        line = line.strip()
+
+                        # Skip empty lines and Guardian headers
+                        if (
+                            not line
+                            or line.startswith("# Managed by guardian-daemon")
+                            or line.startswith("# --- Guardian Managed Rules Below ---")
+                        ):
+                            continue
+
+                        # Check if it's a rule that Guardian manages
+                        try:
+                            parts = line.split(";")
+                            if len(parts) >= 3:
+                                # Track existing Guardian rules
+                                if (
+                                    parts[2] in managed_usernames
+                                    or parts[2] == "!@kids"
+                                ):
+                                    # This is a Guardian rule
+                                    existing_rules.add(line)
+                                    continue
+                        except Exception:
+                            pass
+
+                        # This line is not managed by Guardian, preserve it
+                        preserved_lines.append(line)
+                except Exception as e:
+                    logger.error(f"Error reading {TIME_CONF_PATH}: {e}")
+
+            # Add the preserved content
+            if preserved_lines:
+                desired_content.append("")  # Empty line as separator
+                desired_content.append("# Non-Guardian managed content (preserved)")
+                desired_content.extend(preserved_lines)
+                desired_content.append("")  # Empty line as separator
+
+            # Add our rules
+            desired_content.extend(rules)
+
+            # Check if the current file content matches what we want
+            current_content_matches = False
+            if TIME_CONF_PATH.exists():
+                try:
+                    with open(TIME_CONF_PATH, "r") as f:
+                        current_content = [
+                            line.strip() for line in f.readlines() if line.strip()
+                        ]
+
+                    # Check if every rule we need is already in the file
+                    desired_rules_set = set(rules)
+                    if desired_rules_set.issubset(existing_rules):
+                        # All our rules are already in the file
+
+                        # Check if file doesn't have duplicates or extra Guardian rules
+                        # by counting Guardian rules
+                        guardian_rule_count = sum(
+                            1
+                            for line in current_content
+                            if "!@kids;Al0000-2400" in line
+                            or any(
+                                f";{username};" in line
+                                for username in managed_usernames
+                            )
+                        )
+
+                        if guardian_rule_count == len(desired_rules_set):
+                            logger.info(
+                                "time.conf already contains all needed rules, no update needed"
+                            )
+                            current_content_matches = True
+                except Exception as e:
+                    logger.error(
+                        f"Error checking current {TIME_CONF_PATH} content: {e}"
+                    )
+
+            # Only write if the content needs updating
+            if not current_content_matches:
+                logger.info(
+                    f"Updating {TIME_CONF_PATH} with {len(rules)} managed rules"
                 )
+                try:
+                    # Write the new content
+                    with open(TIME_CONF_PATH, "w") as f:
+                        for line in desired_content:
+                            f.write(line + "\n")
+                    os.chmod(TIME_CONF_PATH, 0o644)
 
-                if result.returncode == 0:
-                    subprocess.run(["systemd-reload-pam"], check=True)
-                    logger.info("Reloaded PAM configuration")
-            except Exception as e:
-                logger.warning(f"Could not reload PAM configuration: {e}")
+                    # Reload PAM configuration if the system supports it
+                    try:
+                        result = subprocess.run(
+                            ["which", "systemd-reload-pam"],
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                        )
 
+                        if result.returncode == 0:
+                            subprocess.run(["systemd-reload-pam"], check=True)
+                            logger.info("Reloaded PAM configuration")
+                    except Exception as e:
+                        logger.warning(f"Could not reload PAM configuration: {e}")
+                except Exception as e:
+                    logger.error(f"Error writing to {TIME_CONF_PATH}: {e}")
+            else:
+                logger.debug(f"No changes needed to {TIME_CONF_PATH}")
+
+                # Reload PAM configuration if the system supports it
+                try:
+                    # Check if systemd-reload-pam exists
+                    result = subprocess.run(
+                        ["which", "systemd-reload-pam"],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+
+                    if result.returncode == 0:
+                        subprocess.run(["systemd-reload-pam"], check=True)
+                        logger.info("Reloaded PAM configuration")
+                except Exception as e:
+                    logger.warning(f"Could not reload PAM configuration: {e}")
         except Exception as e:
             logger.error(f"Failed to write to {TIME_CONF_PATH}: {e}")
+
+    def _cleanup_time_conf(self):
+        """
+        Clean up the time.conf file by removing duplicated rules and Guardian-managed content.
+        This is a more aggressive cleanup than the normal filtering in write_time_rules.
+
+        After cleanup, the file will have:
+        1. Original comment header from the system
+        2. Any preserved third-party rules
+        3. No Guardian rules (these will be added fresh by write_time_rules)
+        """
+        if not TIME_CONF_PATH.exists():
+            logger.debug("No time.conf file to clean up")
+            return
+
+        try:
+            # Read the file
+            with open(TIME_CONF_PATH, "r") as f:
+                all_lines = f.readlines()
+
+            # Count how many lines contained Guardian rules before cleanup
+            guardian_rule_count = sum(
+                1
+                for line in all_lines
+                if (
+                    "!@kids;Al0000-2400" in line
+                    or any(
+                        f";{username};" in line
+                        for username in self.policy.data.get("users", {})
+                    )
+                )
+            )
+
+            # Extract the system's comment header (should be preserved)
+            header_lines = []
+            in_header = True
+
+            for line in all_lines:
+                stripped = line.strip()
+                if in_header:
+                    # While in header section, keep original system comments
+                    if (
+                        stripped.startswith("#")
+                        and not stripped.startswith("# Managed by guardian-daemon")
+                        and not stripped.startswith(
+                            "# --- Guardian Managed Rules Below ---"
+                        )
+                    ):
+                        header_lines.append(line)
+                    elif not stripped:
+                        # Keep blank lines in header
+                        header_lines.append(line)
+                    else:
+                        # Found first non-comment or Guardian-specific comment
+                        # This means we've reached the end of the header
+                        in_header = False
+
+            # Find all non-Guardian rules
+            kept_rules = []
+            managed_usernames = set(self.policy.data.get("users", {}).keys())
+
+            for line in all_lines:
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    # Skip empty lines and comments
+                    continue
+
+                # Check if this is a Guardian rule
+                try:
+                    parts = stripped.split(";")
+                    if len(parts) >= 3:
+                        if parts[2] == "!@kids" or parts[2] in managed_usernames:
+                            # This is a Guardian rule, skip it
+                            continue
+                        else:
+                            # Non-Guardian rule, keep it
+                            kept_rules.append(stripped)
+                except Exception:
+                    # If we can't parse it, keep it to be safe
+                    kept_rules.append(stripped)
+
+            # Remove duplicates while preserving order
+            unique_kept_rules = []
+            for rule in kept_rules:
+                if rule not in unique_kept_rules:
+                    unique_kept_rules.append(rule)
+
+            # Write back a clean file with header + unique non-Guardian rules
+            with open(TIME_CONF_PATH, "w") as f:
+                # Write the original header comments
+                for line in header_lines:
+                    f.write(line)
+
+                # Write unique non-Guardian rules if any
+                if unique_kept_rules:
+                    if header_lines and not header_lines[-1].strip() == "":
+                        f.write("\n")  # Add blank line after header if needed
+                    f.write("# Third-party rules preserved during Guardian cleanup\n")
+                    for rule in unique_kept_rules:
+                        f.write(f"{rule}\n")
+
+            logger.info(
+                f"Cleaned up time.conf: removed {guardian_rule_count} duplicate Guardian rules, kept {len(unique_kept_rules)} non-Guardian rules"
+            )
+
+        except Exception as e:
+            logger.error(f"Error cleaning up time.conf: {e}")
 
     def _generate_rules(self):
         """
@@ -823,6 +1052,146 @@ class UserManager:
 
         logger.info(f"User login setup complete for {username}")
         return True
+
+    def _ensure_sddm_pam_time(self):
+        """
+        Ensures pam_time.so is explicitly added to SDDM's PAM account phase.
+
+        Based on the way authselect works in Fedora/Nobara, we can safely modify
+        /etc/pam.d/sddm directly, as it's not managed by authselect.
+        The correct approach is to add pam_time.so after pam_nologin.so but before
+        the 'include password-auth' line to ensure it's checked before other account validations.
+        """
+        sddm_pam_path = Path("/etc/pam.d/sddm")
+        if not sddm_pam_path.exists():
+            logger.warning("SDDM PAM configuration not found, skipping SDDM PAM fix.")
+            return False
+
+        # Create a backup if it doesn't already exist
+        backup_path = Path(f"{sddm_pam_path}.guardian.bak")
+        if not backup_path.exists():
+            try:
+                shutil.copy2(sddm_pam_path, backup_path)
+                logger.info(f"Created backup of SDDM PAM config at {backup_path}")
+            except Exception as e:
+                logger.error(f"Failed to create SDDM PAM config backup: {e}")
+                return False
+
+        try:
+            # Read the current configuration
+            with open(sddm_pam_path, "r") as f:
+                content = f.read()
+                logger.debug(f"Original SDDM PAM configuration:\n{content}")
+
+            # Reset file pointer and read lines
+            with open(sddm_pam_path, "r") as f:
+                lines = f.readlines()
+
+            # Check if pam_time.so is already explicitly included
+            if any("account" in line and "pam_time.so" in line for line in lines):
+                logger.info(
+                    "SDDM PAM config already includes pam_time.so - curfew enforcement active"
+                )
+                return True
+
+            # Find the position to insert pam_time.so (between pam_nologin and password-auth)
+            modified_lines = []
+            added_pam_time = False
+
+            for i, line in enumerate(lines):
+                modified_lines.append(line)
+
+                # Find the account section with pam_nologin.so and add pam_time.so after it
+                if (
+                    not added_pam_time
+                    and line.strip().startswith("account")
+                    and "required" in line
+                    and "pam_nologin.so" in line
+                    and i + 1 < len(lines)
+                    and "account" in lines[i + 1]
+                    and "include" in lines[i + 1]
+                ):
+                    # Add pam_time.so after pam_nologin but before include password-auth
+                    # Match the spacing of the existing file
+                    modified_lines.append("account     required      pam_time.so\n")
+                    added_pam_time = True
+                    logger.info(
+                        "Adding pam_time.so after pam_nologin.so in SDDM PAM configuration - enabling curfew enforcement"
+                    )
+
+            if not added_pam_time:
+                # If we didn't find the exact pattern, try a more general approach
+                for i, line in enumerate(lines):
+                    if (
+                        not added_pam_time
+                        and i + 1 < len(lines)
+                        and line.strip().startswith("account")
+                        and "include" in lines[i + 1]
+                    ):
+                        # Insert just before the include line
+                        modified_lines.insert(
+                            i + 1, "account     required      pam_time.so\n"
+                        )
+                        added_pam_time = True
+                        logger.info(
+                            "Adding pam_time.so before account include in SDDM PAM config - enabling curfew enforcement"
+                        )
+                        break
+
+            if not added_pam_time:
+                logger.warning(
+                    "Could not locate proper position to add pam_time.so in SDDM config"
+                )
+                return False
+
+            # Write the modified configuration
+            with open(sddm_pam_path, "w") as f:
+                f.writelines(modified_lines)
+
+            # Read back and log the modified content
+            with open(sddm_pam_path, "r") as f:
+                modified_content = f.read()
+                logger.debug(f"Modified SDDM PAM configuration:\n{modified_content}")
+
+            logger.info(
+                "Successfully added pam_time.so to SDDM PAM configuration - graphical login curfew enforcement is now active"
+            )
+
+            # Verify the change with a quick test
+            try:
+                result = subprocess.run(
+                    ["grep", "pam_time.so", str(sddm_pam_path)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    logger.debug(
+                        f"Verified pam_time.so was added: {result.stdout.strip()}"
+                    )
+                else:
+                    logger.warning(
+                        "Failed to find pam_time.so in SDDM configuration after modification"
+                    )
+            except Exception as e:
+                logger.warning(f"Could not verify SDDM PAM configuration: {e}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to modify SDDM PAM configuration: {e}")
+
+            # Try to restore from backup if modification failed
+            try:
+                if backup_path.exists():
+                    shutil.copy2(backup_path, sddm_pam_path)
+                    logger.info("Restored SDDM PAM configuration from backup")
+            except Exception as restore_error:
+                logger.error(
+                    f"Failed to restore SDDM PAM config from backup: {restore_error}"
+                )
+
+            return False
 
     def _run_systemctl_user_command(self, username, *args):
         """Helper to run systemctl --user commands for a given user.
