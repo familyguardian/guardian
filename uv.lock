@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 
 [manifest]
@@ -275,11 +275,15 @@ name = "guardianctl"
 version = "0.1.0"
 source = { virtual = "guardianctl" }
 dependencies = [
+    { name = "pyyaml" },
     { name = "typer" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "typer", specifier = ">=0.17.4" }]
+requires-dist = [
+    { name = "pyyaml", specifier = ">=6.0.0" },
+    { name = "typer", specifier = ">=0.17.4" },
+]
 
 [[package]]
 name = "idna"
