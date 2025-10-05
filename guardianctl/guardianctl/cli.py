@@ -74,9 +74,16 @@ for cmd, meta in get_ipc_commands().items():
 
         return _cmd
 
-    # Typer benötigt die Parameter als Funktionsargumente
-    param_defs = {p: typer.Option(None, help=f"Parameter {p}") for p in params}
-    app.command(name=cmd)(typer.main.get_command(make_cmd(cmd, params), param_defs))
+    # Create a function with the proper parameters
+    cmd_func = make_cmd(cmd, params)
+
+    # Add parameter annotations and typer options
+    for param in params:
+        cmd_func.__annotations__[param] = str
+        typer.Option(None, help=f"Parameter {param}")(cmd_func, param)
+
+    # Register the command with typer
+    app.command(name=cmd)(cmd_func)
 
 if __name__ == "__main__":
     app()

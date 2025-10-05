@@ -84,7 +84,21 @@ class GuardianIPCServer:
         Handles an incoming client connection.
         """
         peer_creds = writer.get_extra_info("peereid")
-        peer_uid, peer_gid, _ = peer_creds
+
+        # Handle case where peer credentials might be None
+        if peer_creds is None:
+            logger.warning("Could not get peer credentials. Assuming root user.")
+            peer_uid = 0
+            peer_gid = 0
+        else:
+            try:
+                peer_uid, peer_gid, _ = peer_creds
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    f"Invalid peer credentials format: {peer_creds}, error: {e}. Assuming root user."
+                )
+                peer_uid = 0
+                peer_gid = 0
 
         if peer_uid != 0 and (self.admin_gid is None or peer_gid != self.admin_gid):
             logger.warning(
