@@ -8,8 +8,12 @@ import socket
 from typing import Dict
 
 import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 app = typer.Typer()
+console = Console()
 
 IPC_SOCKET = "/run/guardian-daemon.sock"
 
@@ -216,23 +220,34 @@ def format_command_output(command, data, param=None):
     # List kids (show users)
     if command == "list_kids":
         if "kids" in data and data["kids"]:
-            typer.secho("📋 Users in Guardian system:", fg="blue", bold=True)
-            for idx, kid in enumerate(sorted(data["kids"]), 1):
-                typer.echo(f"{idx}. {kid}")
+            table = Table(show_header=False, box=True, expand=True)
+            table.add_column("Users", style="cyan")
+
+            sorted_users = sorted(data["kids"])
+            for kid in sorted_users:
+                table.add_row(kid)
+
+            console.print(
+                Panel(table, title="📋 Users in Guardian System", border_style="blue")
+            )
         else:
-            typer.echo("No users found in the system.")
+            console.print(
+                Panel(
+                    "No users found in the system.",
+                    title="Users",
+                    border_style="yellow",
+                )
+            )
 
     # Get quota
     elif command == "get_quota":
         if "kid" in data:
-            typer.secho(f"⏱️  Screen time for user: {data['kid']}", fg="blue", bold=True)
+            # Create a rich table for quota information
+            table = Table(box=True, expand=True)
+            table.add_column("Quota", style="cyan")
+            table.add_column("Time (min)", justify="right")
 
-            # Create a table with time information
-            typer.echo("┌─────────────────┬───────────────┐")
-            typer.echo("│ Quota           │ Time (min)    │")
-            typer.echo("├─────────────────┼───────────────┤")
-
-            # Used time - color based on percentage
+            # Calculate percentage for coloring
             used_percent = (
                 (data["used"] / data["limit"]) * 100 if data["limit"] > 0 else 0
             )
@@ -242,99 +257,142 @@ def format_command_output(command, data, param=None):
             elif used_percent >= 50:
                 used_color = "yellow"
 
-            typer.echo("│ Used            │ ", nl=False)
-            typer.secho(f"{data['used']:12.1f}", fg=used_color, nl=False)
-            typer.echo(" │")
+            # Add rows with appropriate styling
+            table.add_row("Used", f"[{used_color}]{data['used']:.1f}[/{used_color}]")
+            table.add_row("Remaining", f"[green]{data['remaining']:.1f}[/green]")
+            table.add_row("Daily limit", f"{data['limit']:.1f}")
 
-            # Remaining time
-            typer.echo("│ Remaining       │ ", nl=False)
-            typer.secho(f"{data['remaining']:12.1f}", fg="green", nl=False)
-            typer.echo(" │")
-
-            # Total time
-            typer.echo(f"│ Daily limit     │ {data['limit']:12.1f} │")
-            typer.echo("└─────────────────┴───────────────┘")
-
-            # Progress bar
+            # Create progress bar
             width = 40
             filled = (
                 int(width * (data["used"] / data["limit"])) if data["limit"] > 0 else 0
             )
             bar = "█" * filled + "░" * (width - filled)
             percent = int(used_percent)
-            typer.echo(f"Usage: {bar} {percent}%")
+            progress = f"Usage: {bar} {percent}%"
+
+            # Combine table and progress bar in a panel
+            console.print(
+                Panel(
+                    "\n".join([str(table), "\n" + progress]),
+                    title=f"⏱️  Screen Time for User: {data['kid']}",
+                    border_style="blue",
+                )
+            )
 
     # Get curfew
     elif command == "get_curfew":
         if "kid" in data and "curfew" in data:
-            typer.secho(
-                f"🕒 Curfew times for user: {data['kid']}", fg="blue", bold=True
-            )
-
             curfew = data["curfew"]
-            typer.echo("┌─────────────┬──────────────────┐")
-            typer.echo("│ Day         │ Allowed time     │")
-            typer.echo("├─────────────┼──────────────────┤")
+
+            table = Table(box=True, expand=True)
+            table.add_column("Day", style="cyan")
+            table.add_column("Allowed Time")
 
             if "weekdays" in curfew:
-                typer.echo(f"│ Weekdays    │ {curfew['weekdays']:16} │")
+                table.add_row("Weekdays", curfew["weekdays"])
 
             if "saturday" in curfew:
-                typer.echo(f"│ Saturday    │ {curfew['saturday']:16} │")
+                table.add_row("Saturday", curfew["saturday"])
 
             if "sunday" in curfew:
-                typer.echo(f"│ Sunday      │ {curfew['sunday']:16} │")
+                table.add_row("Sunday", curfew["sunday"])
 
-            typer.echo("└─────────────┴──────────────────┘")
+            console.print(
+                Panel(
+                    table,
+                    title=f"🕒 Curfew Times for User: {data['kid']}",
+                    border_style="blue",
+                )
+            )
 
     # List timers
     elif command == "list_timers":
         if "timers" in data and data["timers"]:
-            typer.secho("⏰ Active Guardian timers:", fg="blue", bold=True)
-            for idx, timer in enumerate(data["timers"], 1):
-                typer.echo(f"{idx}. {timer}")
+            table = Table(show_header=False, box=True, expand=True)
+            table.add_column("Timers", style="cyan")
+
+            for timer in data["timers"]:
+                table.add_row(timer)
+
+            console.print(
+                Panel(table, title="⏰ Active Guardian Timers", border_style="blue")
+            )
         else:
-            typer.echo("No active timers found.")
+            console.print(
+                Panel("No active timers found.", title="Timers", border_style="yellow")
+            )
 
     # Sync users from config
     elif command == "sync_users_from_config":
         if data.get("status") == "success":
-            typer.secho("✅ User synchronization successful!", fg="green")
-
             updated = data.get("updated", [])
             added = data.get("added", [])
 
+            result_text = ""
+
             if updated:
-                typer.echo(f"\nUpdated users ({len(updated)}):")
+                update_table = Table(show_header=False, box=False)
+                update_table.add_column("User", style="cyan")
                 for user in updated:
-                    typer.echo(f"  • {user}")
+                    update_table.add_row(f"• {user}")
+
+                result_text += f"Updated Users ({len(updated)}):\n"
+                result_text += str(update_table) + "\n"
 
             if added:
-                typer.echo(f"\nAdded users ({len(added)}):")
+                added_table = Table(show_header=False, box=False)
+                added_table.add_column("User", style="cyan")
                 for user in added:
-                    typer.echo(f"  • {user}")
+                    added_table.add_row(f"• {user}")
+
+                result_text += f"Added Users ({len(added)}):\n"
+                result_text += str(added_table)
 
             if not updated and not added:
-                typer.echo("No changes were needed.")
+                result_text = "No changes were needed."
+
+            console.print(
+                Panel(
+                    result_text,
+                    title="✅ User Synchronization Successful",
+                    border_style="green",
+                )
+            )
         else:
-            typer.secho(
-                f"❌ Synchronization failed: {data.get('message', 'Unknown error')}",
-                fg="red",
+            console.print(
+                Panel(
+                    data.get("message", "Unknown error"),
+                    title="❌ Synchronization Failed",
+                    border_style="red",
+                )
             )
 
     # Add user
     elif command == "add_user":
         if data.get("status") == "success":
-            typer.secho(
-                f"✅ User '{param}' added successfully with default settings!",
-                fg="green",
+            console.print(
+                Panel(
+                    f"User '{param}' added successfully with default settings!",
+                    title="✅ Success",
+                    border_style="green",
+                )
             )
         elif data.get("status") == "exists":
-            typer.secho(f"⚠️ User '{param}' already exists.", fg="yellow")
+            console.print(
+                Panel(
+                    f"User '{param}' already exists.",
+                    title="⚠️ Warning",
+                    border_style="yellow",
+                )
+            )
         else:
-            typer.secho(
-                f"❌ Failed to add user: {data.get('message', 'Unknown error')}",
-                fg="red",
+            console.print(
+                Panel(
+                    data.get("message", "Unknown error"),
+                    title="❌ Failed to Add User",
+                    border_style="red",
+                )
             )
 
     # Update user
@@ -343,46 +401,95 @@ def format_command_output(command, data, param=None):
             parts = param.split(maxsplit=2) if param else []
             if len(parts) >= 2:
                 username, setting = parts[0], parts[1]
-                typer.secho(f"✅ Updated {setting} for user '{username}'", fg="green")
+                message = f"Updated {setting} for user '{username}'"
                 if len(parts) > 2:
-                    typer.echo(f"New value: {parts[2]}")
+                    message += f"\nNew value: {parts[2]}"
+                console.print(Panel(message, title="✅ Success", border_style="green"))
             else:
-                typer.secho("✅ User setting updated successfully", fg="green")
+                console.print(
+                    Panel(
+                        "User setting updated successfully",
+                        title="✅ Success",
+                        border_style="green",
+                    )
+                )
         else:
-            typer.secho(
-                f"❌ Failed to update setting: {data.get('message', 'Unknown error')}",
-                fg="red",
+            console.print(
+                Panel(
+                    data.get("message", "Unknown error"),
+                    title="❌ Failed to Update Setting",
+                    border_style="red",
+                )
             )
 
     # Reset quota
     elif command == "reset_quota":
         if data.get("status", "").startswith("quota reset"):
-            typer.secho("✅ Daily quotas have been reset for all users", fg="green")
+            console.print(
+                Panel(
+                    "Daily quotas have been reset for all users",
+                    title="✅ Success",
+                    border_style="green",
+                )
+            )
         else:
-            typer.echo(f"Operation completed: {data.get('status', 'Unknown status')}")
+            console.print(
+                Panel(
+                    data.get("status", "Unknown status"),
+                    title="Operation Completed",
+                    border_style="blue",
+                )
+            )
 
     # Reload timers
     elif command == "reload_timers":
         if data.get("status", "").startswith("timers reloaded"):
-            typer.secho("✅ Timer configuration has been reloaded", fg="green")
+            console.print(
+                Panel(
+                    "Timer configuration has been reloaded",
+                    title="✅ Success",
+                    border_style="green",
+                )
+            )
         else:
-            typer.echo(f"Operation completed: {data.get('status', 'Unknown status')}")
+            console.print(
+                Panel(
+                    data.get("status", "Unknown status"),
+                    title="Operation Completed",
+                    border_style="blue",
+                )
+            )
 
     # Setup user
     elif command == "setup-user":
         if data.get("status") == "success":
-            typer.secho(f"✅ User '{param}' has been set up successfully!", fg="green")
-            typer.echo("User can now log in with Guardian screen time management.")
+            console.print(
+                Panel(
+                    f"User '{param}' has been set up successfully!\n"
+                    f"User can now log in with Guardian screen time management.",
+                    title="✅ Success",
+                    border_style="green",
+                )
+            )
         else:
-            typer.secho(
-                f"❌ Failed to set up user: {data.get('message', 'Unknown error')}",
-                fg="red",
+            console.print(
+                Panel(
+                    data.get("message", "Unknown error"),
+                    title="❌ Failed to Set Up User",
+                    border_style="red",
+                )
             )
 
     # Default handling for any other commands
     else:
-        # Just pretty-print the JSON as a fallback
-        typer.echo(json.dumps(data, indent=2))
+        # Format unknown commands as a panel with JSON content
+        console.print(
+            Panel(
+                json.dumps(data, indent=2),
+                title=f"Command Output: {command}",
+                border_style="blue",
+            )
+        )
 
 
 def register_diagnostic_commands():
