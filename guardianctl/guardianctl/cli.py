@@ -272,8 +272,22 @@ def format_command_output(command, data, param=None):
             percent = int(used_percent)
             progress = f"Usage: {bar} {percent}%"
 
-            # Combine table and progress bar in a panel
-            panel_content = f"{table}\n\n{progress}"
+            # Create a string representation of the table data
+            table_data = []
+            table_data.append("  Quota                                    Time (min)")
+            table_data.append("  " + "─" * 58)
+            table_data.append(
+                f"  Used                               [{used_color}]{data['used']:.1f}[/{used_color}]"
+            )
+            table_data.append(
+                f"  Remaining                          [green]{data['remaining']:.1f}[/green]"
+            )
+            table_data.append(
+                f"  Daily limit                        {data['limit']:.1f}"
+            )
+
+            # Combine data and progress bar in a panel
+            panel_content = "\n".join(table_data) + f"\n\n  {progress}"
 
             console.print(
                 Panel(
