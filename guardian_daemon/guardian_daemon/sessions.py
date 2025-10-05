@@ -179,8 +179,14 @@ class SessionTracker:
                 username, since=last_reset.timestamp()
             )
             # Filter: Only sessions with meaningful duration and not systemd-user sessions
+            # IMPORTANT: Also filter out sessions that are currently active to avoid double-counting
+            active_session_ids = set(self.active_sessions.keys())
             filtered_sessions = [
-                s for s in db_sessions if s[6] > 30 and s[8] != "systemd-user"
+                s
+                for s in db_sessions
+                if s[6] > 30
+                and s[8] != "systemd-user"
+                and s[0] not in active_session_ids
             ]
             db_duration_seconds = sum(s[6] for s in filtered_sessions)
 
