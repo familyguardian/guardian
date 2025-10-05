@@ -634,48 +634,84 @@ class SessionTracker:
 
         def session_new_handler(session_id, object_path):
             async def inner():
-                session_obj = bus.get_proxy_object(
-                    "org.freedesktop.login1",
-                    object_path,
-                    await bus.introspect("org.freedesktop.login1", object_path),
-                )
-                session_iface = session_obj.get_interface(
-                    "org.freedesktop.login1.Session"
-                )
-                props = {}
-                introspection = await bus.introspect(
-                    "org.freedesktop.login1", object_path
-                )
-                session_interface = next(
-                    (
-                        iface
-                        for iface in introspection.interfaces
-                        if iface.name == "org.freedesktop.login1.Session"
-                    ),
-                    None,
-                )
-                if session_interface:
-                    property_names = [p.name for p in session_interface.properties]
-                    for prop in property_names:
-                        getter = getattr(session_iface, f"get_{prop.lower()}", None)
-                        if getter:
-                            try:
-                                props[prop] = await getter()
-                            except Exception as e:
-                                props[prop] = f"[ERROR: {e}]"
-                        else:
-                            props[prop] = "[NO GETTER]"
-                else:
-                    props = {"error": "Session interface not found in introspection"}
+                try:
+                    # Try to get session object - this might fail if the session is already gone
+                    session_obj = bus.get_proxy_object(
+                        "org.freedesktop.login1",
+                        object_path,
+                        await bus.introspect("org.freedesktop.login1", object_path),
+                    )
+                    session_iface = session_obj.get_interface(
+                        "org.freedesktop.login1.Session"
+                    )
+                    props = {}
+                    introspection = await bus.introspect(
+                        "org.freedesktop.login1", object_path
+                    )
+                    session_interface = next(
+                        (
+                            iface
+                            for iface in introspection.interfaces
+                            if iface.name == "org.freedesktop.login1.Session"
+                        ),
+                        None,
+                    )
+                    if session_interface:
+                        property_names = [p.name for p in session_interface.properties]
+                        for prop in property_names:
+                            getter = getattr(session_iface, f"get_{prop.lower()}", None)
+                            if getter:
+                                try:
+                                    props[prop] = await getter()
+                                except Exception as e:
+                                    props[prop] = f"[ERROR: {e}]"
+                            else:
+                                props[prop] = "[NO GETTER]"
+                    else:
+                        props = {
+                            "error": "Session interface not found in introspection"
+                        }
 
-                uid = await session_iface.get_uid()
-                username = await self._get_username(uid)
-                await self.handle_login(session_id, uid, username, props)
+                    # Try to get the UID, with fallback to alternative methods
+                    uid = None
+                    try:
+                        # First try the direct get_uid method
+                        uid = await session_iface.get_uid()
+                    except AttributeError:
+                        # If get_uid fails, try get_user which might return a UID
+                        try:
+                            logger.debug("get_uid failed, trying get_user for session")
+                            user = await session_iface.get_user()
+                            if isinstance(user, int):
+                                uid = user
+                        except Exception:
+                            # As a last resort, try to extract from properties
+                            logger.debug("get_user failed, checking properties for UID")
+                            if "User" in props and isinstance(props["User"], int):
+                                uid = props["User"]
+
+                    # If we still couldn't get the UID, we can't proceed
+                    if uid is None:
+                        logger.warning(
+                            f"Failed to get UID for session {session_id}, cannot handle login"
+                        )
+                        return
+
+                    username = await self._get_username(uid)
+                    await self.handle_login(session_id, uid, username, props)
+                except Exception as e:
+                    logger.error(f"Error processing new session {session_id}: {e}")
 
             asyncio.create_task(inner())
 
         def session_removed_handler(session_id, object_path):
-            asyncio.create_task(self.handle_logout(session_id))
+            async def safe_logout():
+                try:
+                    await self.handle_logout(session_id)
+                except Exception as e:
+                    logger.error(f"Error handling logout for session {session_id}: {e}")
+
+            asyncio.create_task(safe_logout())
 
         manager.on_session_new(session_new_handler)
         manager.on_session_removed(session_removed_handler)
