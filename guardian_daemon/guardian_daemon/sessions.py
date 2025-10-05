@@ -297,12 +297,21 @@ class SessionTracker:
         Restore sessions that are still open (no end_time) from the database into active_sessions.
         Instead of resetting start_time, we now properly account for time already used.
         """
+        # First, clear any existing active sessions to avoid duplicates
+        # This ensures we don't end up with multiple copies of the same session
+        self.active_sessions = {}
+
+        # Track unique sessions by session ID to avoid duplicates
+        unique_sessions = {}
+
         c = self.storage.conn.cursor()
         c.execute(
             "SELECT session_id, username, uid, start_time, duration, desktop, service FROM sessions WHERE end_time IS NULL OR end_time = 0"
         )
         rows = c.fetchall()
         now = time.time()
+
+        # First, collect all unique sessions by session_id
         for row in rows:
             # Safely handle both old and new DB schema versions by checking column count
             if len(row) >= 7:
@@ -321,18 +330,37 @@ class SessionTracker:
                 desktop = ""
                 service = ""
 
+            # Only process each unique session_id once
+            # If we've seen this session_id before, skip it
+            if session_id in unique_sessions:
+                continue
+
+            # Store this as a unique session
+            unique_sessions[session_id] = {
+                "uid": uid,
+                "username": username,
+                "old_start_time": old_start_time,
+                "duration": duration,
+                "desktop": desktop,
+                "service": service,
+            }
+
+        # Now process the unique sessions
+        for session_id, session_data in unique_sessions.items():
             # Instead of resetting start_time to now, we adjust it based on already recorded duration
             # This ensures we properly account for time already spent in this session
             # By subtracting the duration from now, we keep the accumulated time intact
-            adjusted_start_time = now - (duration if duration else 0)
+            adjusted_start_time = now - (
+                session_data["duration"] if session_data["duration"] else 0
+            )
 
             self.active_sessions[session_id] = {
-                "uid": uid,
-                "username": username,
+                "uid": session_data["uid"],
+                "username": session_data["username"],
                 "start_time": adjusted_start_time,
-                "original_start_time": old_start_time,
-                "desktop": desktop,
-                "service": service,
+                "original_start_time": session_data["old_start_time"],
+                "desktop": session_data["desktop"],
+                "service": session_data["service"],
             }
             logger.info(
                 f"Restored session {session_id} for {username}. Original start: {old_start_time}, duration so far: {duration/60:.1f} min, adjusted start: {adjusted_start_time}"
