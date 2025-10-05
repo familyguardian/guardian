@@ -272,19 +272,16 @@ def format_command_output(command, data, param=None):
             percent = int(used_percent)
             progress = f"Usage: {bar} {percent}%"
 
-            # Create a string output for the panel content
-            content = f"{table}\n\n{progress}"
-
-            # Combine table and progress bar in a panel
-            console.print(
-                Panel(
-                    content,
-                    title=f"⏱️  Screen Time for User: {data['kid']}",
-                    border_style="blue",
-                )
+            # First print the table directly
+            quota_panel = Panel(
+                f"{progress}",
+                title=f"⏱️  Screen Time for User: {data['kid']}",
+                border_style="blue",
             )
 
-    # Get curfew
+            # Create a layout with the table first, then the panel
+            console.print(table)
+            console.print(quota_panel)  # Get curfew
     elif command == "get_curfew":
         if "kid" in data and "curfew" in data:
             curfew = data["curfew"]
