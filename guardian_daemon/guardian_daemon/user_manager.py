@@ -649,12 +649,12 @@ class UserManager:
         users = self.policy.data.get("users", {})
         managed_users = list(users.keys())
 
-        # Rule 1: Allow all users who are NOT in the 'kids' group at all times.
-        # The '!@group' syntax refers to users not in a local group.
-        # This is much more robust than listing individual users.
-        if managed_users:
-            rules.append("*;*;!@kids;Al0000-2400")
-            rules.append("# --- Guardian Managed Rules Below ---")
+        # Start with an explanatory comment
+        rules.append("# --- Guardian Managed Rules Below ---")
+
+        # Generate rules for each managed user first
+        # This follows the "first match wins" logic of pam_time.so
+        # Each user gets their specific allow rules followed by a catch-all deny
 
         # Rule 2: Define specific time restrictions for each managed user.
         day_mapping = {
@@ -683,8 +683,17 @@ class UserManager:
 
                 if time_specs:
                     # Apply the combined rule to all services and ttys for the user.
-                    combined_times = "&".join(time_specs)
+                    # Use OR (|) to allow login during ANY of the specified day-time periods
+                    combined_times = "|".join(time_specs)
                     rules.append(f"*;*;{username};{combined_times}")
+
+                    # Add a deny rule for this user for all other times
+                    # This explicitly denies the user outside their allowed times
+                    rules.append(f"*;*;{username};!Al0000-2400")
+
+        # Finally, add a rule to allow all users not in kids group at all times
+        # This must come AFTER the specific user rules due to "first match wins"
+        rules.append("*;*;!@kids;Al0000-2400")
 
         logger.debug(f"Generated {len(rules)} PAM time rules.")
         return rules
