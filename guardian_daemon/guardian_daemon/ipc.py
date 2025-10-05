@@ -61,6 +61,9 @@ class GuardianIPCServer:
             "reset_quota": self.handle_reset_quota,
             "describe_commands": self.handle_describe_commands,
             "setup-user": self.handle_setup_user,
+            "sync_users_from_config": self.handle_sync_users_from_config,
+            "add_user": self.handle_add_user,
+            "update_user": self.handle_update_user,
         }
 
     async def start(self):
@@ -326,6 +329,203 @@ class GuardianIPCServer:
 
         logger.debug(f"Describing IPC commands: {list(commands.keys())}")
         return json.dumps(commands)
+
+    def handle_sync_users_from_config(self, _):
+        """
+        Reset user settings in the database to match the configuration file.
+        This also imports new users from the config to the database.
+        """
+        try:
+            # Get all users from the config
+            config_users = self.policy.data.get("users", {})
+            defaults = self.policy.data.get("defaults", {})
+
+            # Get all users currently in the database
+            db_users = []
+            current_settings = {}
+
+            # Store settings for all users in the database
+            for username in self.policy.get_all_usernames():
+                db_users.append(username)
+                user_settings = self.policy.get_user_policy(username)
+                if user_settings:
+                    current_settings[username] = user_settings
+
+            # Track changes for reporting
+            updated = []
+            added = []
+
+            # Update existing users in the database with config settings
+            for username, settings in config_users.items():
+                if not settings:
+                    settings = defaults
+
+                if username in db_users:
+                    # User exists in DB, update settings
+                    self.policy.storage.set_user_settings(username, settings)
+                    updated.append(username)
+                    logger.info(f"Updated settings for existing user: {username}")
+                else:
+                    # User not in DB, add them
+                    self.policy.add_user(username)
+                    self.policy.storage.set_user_settings(username, settings)
+                    added.append(username)
+                    logger.info(f"Added new user from config: {username}")
+
+            return json.dumps(
+                {
+                    "status": "success",
+                    "updated": updated,
+                    "added": added,
+                    "message": f"Synchronized {len(updated)} existing users and added {len(added)} new users",
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error synchronizing users from config: {e}")
+            return json.dumps({"error": str(e)})
+
+    def handle_add_user(self, username):
+        """
+        Add a new user to the database with default settings.
+
+        Args:
+            username (str): Username to add
+        """
+        if not username:
+            logger.warning("add_user called without username argument")
+            return json.dumps({"error": "missing username"})
+
+        try:
+            # Check if user already exists
+            if username in self.policy.get_all_usernames():
+                logger.warning(f"User '{username}' already exists in the database")
+                return json.dumps(
+                    {"error": f"User '{username}' already exists", "status": "exists"}
+                )
+
+            # Add user with default settings
+            if self.policy.add_user(username):
+                logger.info(f"Added new user with default settings: {username}")
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "message": f"Added user '{username}' with default settings",
+                    }
+                )
+            else:
+                logger.error(f"Failed to add user: {username}")
+                return json.dumps(
+                    {"error": f"Failed to add user '{username}'", "status": "error"}
+                )
+        except Exception as e:
+            logger.error(f"Error adding user '{username}': {e}")
+            return json.dumps({"error": str(e)})
+
+    def handle_update_user(self, args):
+        """
+        Update a specific setting for a user.
+
+        Args:
+            args (str): Format should be "username setting_key setting_value"
+        """
+        if not args or len(args.split()) < 3:
+            logger.warning("update_user called with invalid arguments")
+            return json.dumps(
+                {
+                    "error": "Invalid arguments. Format should be: username setting_key setting_value",
+                    "status": "error",
+                }
+            )
+
+        try:
+            # Parse arguments
+            parts = args.split(maxsplit=2)
+            username, setting_key, setting_value = parts
+
+            # Valid settings that can be updated
+            valid_settings = [
+                "daily_quota_minutes",
+                "curfew",
+                "grace_minutes",
+                "bonus_pool_minutes",
+            ]
+
+            if setting_key not in valid_settings:
+                logger.warning(f"Invalid setting key: {setting_key}")
+                return json.dumps(
+                    {
+                        "error": f"Invalid setting key. Must be one of: {', '.join(valid_settings)}",
+                        "status": "error",
+                    }
+                )
+
+            # Get current user settings
+            user_settings = self.policy.get_user_policy(username)
+            if not user_settings:
+                logger.warning(f"User '{username}' not found in database")
+                return json.dumps(
+                    {"error": f"User '{username}' not found", "status": "not_found"}
+                )
+
+            # Parse and validate setting value based on setting type
+            if (
+                setting_key == "daily_quota_minutes"
+                or setting_key == "grace_minutes"
+                or setting_key == "bonus_pool_minutes"
+            ):
+                try:
+                    # Convert to int for numeric settings
+                    setting_value = int(setting_value)
+                    if setting_value < 0:
+                        return json.dumps(
+                            {
+                                "error": f"{setting_key} cannot be negative",
+                                "status": "error",
+                            }
+                        )
+                except ValueError:
+                    return json.dumps(
+                        {
+                            "error": f"Invalid value for {setting_key}. Must be a number.",
+                            "status": "error",
+                        }
+                    )
+            elif setting_key == "curfew":
+                try:
+                    # Parse as JSON for complex settings
+                    setting_value = json.loads(setting_value)
+                    # Validate curfew format
+                    required_keys = ["weekdays", "saturday", "sunday"]
+                    for key in required_keys:
+                        if key not in setting_value:
+                            return json.dumps(
+                                {
+                                    "error": f"Curfew must contain {', '.join(required_keys)}",
+                                    "status": "error",
+                                }
+                            )
+                except json.JSONDecodeError:
+                    return json.dumps(
+                        {"error": "Invalid JSON format for curfew", "status": "error"}
+                    )
+
+            # Update the setting
+            user_settings[setting_key] = setting_value
+            self.policy.storage.set_user_settings(username, user_settings)
+
+            logger.info(f"Updated {setting_key} for user {username}")
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Updated {setting_key} for user {username}",
+                    "username": username,
+                    "setting": setting_key,
+                    "value": setting_value,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error updating user setting: {e}")
+            return json.dumps({"error": str(e)})
 
     def close(self):
         """

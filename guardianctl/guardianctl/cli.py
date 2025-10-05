@@ -143,14 +143,27 @@ def create_command(app_instance, cli_name, ipc_name, description, params):
 
         @app_instance.command(name=cli_name)
         def cmd_with_param(
-            param: str = typer.Argument(..., help=f"Parameter for {cli_name}")
+            param: str = typer.Argument(..., help=f"Parameter for {cli_name}"),
+            json_output: bool = typer.Option(
+                False, "--json", help="Output raw JSON instead of formatted tables"
+            ),
         ):
             """Dynamic command handler with parameter."""
             result = ipc_call(ipc_name, param)
             try:
-                # Try to pretty-print JSON responses
+                # Parse the JSON response
                 parsed = json.loads(result)
-                typer.echo(json.dumps(parsed, indent=2))
+
+                # If JSON output is requested or there's an error, output raw JSON
+                if json_output or "error" in parsed:
+                    if "error" in parsed:
+                        typer.secho(f"❌ Error: {parsed['error']}", fg="red", err=True)
+                    if json_output:
+                        typer.echo(json.dumps(parsed, indent=2))
+                    return
+
+                # Format the output based on the command
+                format_command_output(ipc_name, parsed, param)
             except (json.JSONDecodeError, ValueError):
                 # If not JSON, just print as-is
                 typer.echo(result)
@@ -162,19 +175,214 @@ def create_command(app_instance, cli_name, ipc_name, description, params):
     else:
 
         @app_instance.command(name=cli_name)
-        def cmd_without_param():
+        def cmd_without_param(
+            json_output: bool = typer.Option(
+                False, "--json", help="Output raw JSON instead of formatted tables"
+            )
+        ):
             """Dynamic command handler without parameter."""
             result = ipc_call(ipc_name)
             try:
-                # Try to pretty-print JSON responses
+                # Parse the JSON response
                 parsed = json.loads(result)
-                typer.echo(json.dumps(parsed, indent=2))
+
+                # If JSON output is requested or there's an error, output raw JSON
+                if json_output or "error" in parsed:
+                    if "error" in parsed:
+                        typer.secho(f"❌ Error: {parsed['error']}", fg="red", err=True)
+                    if json_output:
+                        typer.echo(json.dumps(parsed, indent=2))
+                    return
+
+                # Format the output based on the command
+                format_command_output(ipc_name, parsed)
             except (json.JSONDecodeError, ValueError):
                 # If not JSON, just print as-is
                 typer.echo(result)
 
         # Set the docstring
         cmd_without_param.__doc__ = description
+
+
+def format_command_output(command, data, param=None):
+    """
+    Format command output in a user-friendly way based on the command type.
+
+    Args:
+        command (str): The IPC command name
+        data (dict): The parsed JSON response data
+        param (str, optional): The parameter passed to the command (if any)
+    """
+    # List kids (show users)
+    if command == "list_kids":
+        if "kids" in data and data["kids"]:
+            typer.secho("📋 Users in Guardian system:", fg="blue", bold=True)
+            for idx, kid in enumerate(sorted(data["kids"]), 1):
+                typer.echo(f"{idx}. {kid}")
+        else:
+            typer.echo("No users found in the system.")
+
+    # Get quota
+    elif command == "get_quota":
+        if "kid" in data:
+            typer.secho(f"⏱️  Screen time for user: {data['kid']}", fg="blue", bold=True)
+
+            # Create a table with time information
+            typer.echo("┌─────────────────┬───────────────┐")
+            typer.echo("│ Quota           │ Time (min)    │")
+            typer.echo("├─────────────────┼───────────────┤")
+
+            # Used time - color based on percentage
+            used_percent = (
+                (data["used"] / data["limit"]) * 100 if data["limit"] > 0 else 0
+            )
+            used_color = "green"
+            if used_percent >= 80:
+                used_color = "red"
+            elif used_percent >= 50:
+                used_color = "yellow"
+
+            typer.echo("│ Used            │ ", nl=False)
+            typer.secho(f"{data['used']:12.1f}", fg=used_color, nl=False)
+            typer.echo(" │")
+
+            # Remaining time
+            typer.echo("│ Remaining       │ ", nl=False)
+            typer.secho(f"{data['remaining']:12.1f}", fg="green", nl=False)
+            typer.echo(" │")
+
+            # Total time
+            typer.echo(f"│ Daily limit     │ {data['limit']:12.1f} │")
+            typer.echo("└─────────────────┴───────────────┘")
+
+            # Progress bar
+            width = 40
+            filled = (
+                int(width * (data["used"] / data["limit"])) if data["limit"] > 0 else 0
+            )
+            bar = "█" * filled + "░" * (width - filled)
+            percent = int(used_percent)
+            typer.echo(f"Usage: {bar} {percent}%")
+
+    # Get curfew
+    elif command == "get_curfew":
+        if "kid" in data and "curfew" in data:
+            typer.secho(
+                f"🕒 Curfew times for user: {data['kid']}", fg="blue", bold=True
+            )
+
+            curfew = data["curfew"]
+            typer.echo("┌─────────────┬──────────────────┐")
+            typer.echo("│ Day         │ Allowed time     │")
+            typer.echo("├─────────────┼──────────────────┤")
+
+            if "weekdays" in curfew:
+                typer.echo(f"│ Weekdays    │ {curfew['weekdays']:16} │")
+
+            if "saturday" in curfew:
+                typer.echo(f"│ Saturday    │ {curfew['saturday']:16} │")
+
+            if "sunday" in curfew:
+                typer.echo(f"│ Sunday      │ {curfew['sunday']:16} │")
+
+            typer.echo("└─────────────┴──────────────────┘")
+
+    # List timers
+    elif command == "list_timers":
+        if "timers" in data and data["timers"]:
+            typer.secho("⏰ Active Guardian timers:", fg="blue", bold=True)
+            for idx, timer in enumerate(data["timers"], 1):
+                typer.echo(f"{idx}. {timer}")
+        else:
+            typer.echo("No active timers found.")
+
+    # Sync users from config
+    elif command == "sync_users_from_config":
+        if data.get("status") == "success":
+            typer.secho("✅ User synchronization successful!", fg="green")
+
+            updated = data.get("updated", [])
+            added = data.get("added", [])
+
+            if updated:
+                typer.echo(f"\nUpdated users ({len(updated)}):")
+                for user in updated:
+                    typer.echo(f"  • {user}")
+
+            if added:
+                typer.echo(f"\nAdded users ({len(added)}):")
+                for user in added:
+                    typer.echo(f"  • {user}")
+
+            if not updated and not added:
+                typer.echo("No changes were needed.")
+        else:
+            typer.secho(
+                f"❌ Synchronization failed: {data.get('message', 'Unknown error')}",
+                fg="red",
+            )
+
+    # Add user
+    elif command == "add_user":
+        if data.get("status") == "success":
+            typer.secho(
+                f"✅ User '{param}' added successfully with default settings!",
+                fg="green",
+            )
+        elif data.get("status") == "exists":
+            typer.secho(f"⚠️ User '{param}' already exists.", fg="yellow")
+        else:
+            typer.secho(
+                f"❌ Failed to add user: {data.get('message', 'Unknown error')}",
+                fg="red",
+            )
+
+    # Update user
+    elif command == "update_user":
+        if data.get("status") == "success":
+            parts = param.split(maxsplit=2) if param else []
+            if len(parts) >= 2:
+                username, setting = parts[0], parts[1]
+                typer.secho(f"✅ Updated {setting} for user '{username}'", fg="green")
+                if len(parts) > 2:
+                    typer.echo(f"New value: {parts[2]}")
+            else:
+                typer.secho("✅ User setting updated successfully", fg="green")
+        else:
+            typer.secho(
+                f"❌ Failed to update setting: {data.get('message', 'Unknown error')}",
+                fg="red",
+            )
+
+    # Reset quota
+    elif command == "reset_quota":
+        if data.get("status", "").startswith("quota reset"):
+            typer.secho("✅ Daily quotas have been reset for all users", fg="green")
+        else:
+            typer.echo(f"Operation completed: {data.get('status', 'Unknown status')}")
+
+    # Reload timers
+    elif command == "reload_timers":
+        if data.get("status", "").startswith("timers reloaded"):
+            typer.secho("✅ Timer configuration has been reloaded", fg="green")
+        else:
+            typer.echo(f"Operation completed: {data.get('status', 'Unknown status')}")
+
+    # Setup user
+    elif command == "setup-user":
+        if data.get("status") == "success":
+            typer.secho(f"✅ User '{param}' has been set up successfully!", fg="green")
+            typer.echo("User can now log in with Guardian screen time management.")
+        else:
+            typer.secho(
+                f"❌ Failed to set up user: {data.get('message', 'Unknown error')}",
+                fg="red",
+            )
+
+    # Default handling for any other commands
+    else:
+        # Just pretty-print the JSON as a fallback
+        typer.echo(json.dumps(data, indent=2))
 
 
 def register_diagnostic_commands():
