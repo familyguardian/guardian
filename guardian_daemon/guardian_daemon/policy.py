@@ -73,14 +73,25 @@ class Policy:
 
     def get_timezone(self) -> str:
         """
-        Return the configured timezone.
+        Returns the configured timezone or the default timezone.
 
         Returns:
-            str: Timezone (e.g. "Europe/Berlin")
+            str: Timezone string
         """
         tz = self.data.get("timezone", "Europe/Berlin")
         logger.debug(f"Configured timezone: {tz}")
         return tz
+
+    def get_all_usernames(self) -> list:
+        """
+        Returns a list of all usernames in the policy.
+
+        Returns:
+            list: List of usernames
+        """
+        users = list(self.data.get("users", {}).keys())
+        logger.debug(f"Retrieved {len(users)} users from policy")
+        return users
 
     def add_user(self, username: str) -> bool:
         """
