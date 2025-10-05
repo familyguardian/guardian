@@ -182,26 +182,11 @@ class Enforcer:
         """
         notified = False
         try:
-            # Attempt to discover agents with up to 3 retries
-            agent_names = []
-            max_retries = 3
-            retry_delay = 2  # seconds
-
-            for attempt in range(max_retries):
-                agent_names = await self.tracker.discover_agent_names_for_user(username)
-                if agent_names:
-                    break
-
-                if attempt < max_retries - 1:
-                    logger.debug(
-                        f"No agent found for {username}, retrying in {retry_delay}s (attempt {attempt+1}/{max_retries})"
-                    )
-                    await asyncio.sleep(retry_delay)
+            # Get agent names from the session tracker's cache
+            agent_names = self.tracker.get_agent_names_for_user(username)
 
             if not agent_names:
-                logger.warning(
-                    f"No running agent found for user {username} after {max_retries} attempts."
-                )
+                logger.warning(f"No running agent found for user {username} in cache.")
                 return
 
             bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
