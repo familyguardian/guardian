@@ -605,30 +605,86 @@ class UserManager:
                 result = self._run_systemctl_user_command(
                     username, "is-active", "guardian_agent.service"
                 )
-                if result and result.stdout.strip() != "active":
-                    logger.debug(f"Starting guardian_agent service for user {username}")
+                if not result or result.stdout.strip() != "active":
+                    logger.info(
+                        f"Enabling and starting guardian_agent service for user {username}"
+                    )
+                    # Make sure the service is enabled first
                     self._run_systemctl_user_command(
+                        username, "enable", "guardian_agent.service"
+                    )
+                    # Then start it
+                    start_result = self._run_systemctl_user_command(
                         username, "start", "guardian_agent.service"
                     )
+                    if not start_result:
+                        logger.warning(
+                            f"Failed to start guardian_agent service for user {username}"
+                        )
+                    else:
+                        logger.info(
+                            f"Successfully started guardian_agent service for user {username}"
+                        )
                 else:
                     logger.debug(
                         f"guardian_agent service for user {username} is already active"
                     )
             else:
                 logger.info(
-                    f"User {username} is not logged in, skipping agent service start"
+                    f"User {username} is not logged in, preparing service for next login"
                 )
-                # Just ensure the service file exists for next login
+                # Ensure service file exists and is set to autostart
                 service_dir = user_home / ".config/systemd/user"
-                if service_dir.exists():
-                    service_file = service_dir / "guardian_agent.service"
-                    if not service_file.exists() and SOURCE_SERVICE_FILE.exists():
-                        logger.debug(
-                            f"Preparing service file for future login of {username}"
+                service_file = service_dir / "guardian_agent.service"
+
+                # Create necessary directories if they don't exist
+                if not service_dir.exists():
+                    logger.debug(f"Creating systemd user directory for {username}")
+                    service_dir.mkdir(parents=True, exist_ok=True)
+                    chown_recursive(service_dir, user_info.pw_uid, user_info.pw_gid)
+
+                # Ensure the service file exists
+                if not service_file.exists() and SOURCE_SERVICE_FILE.exists():
+                    logger.debug(f"Copying service file for {username}")
+                    shutil.copy(SOURCE_SERVICE_FILE, service_file)
+                    os.chown(service_file, user_info.pw_uid, user_info.pw_gid)
+                    os.chmod(service_file, 0o644)  # rw-r--r--
+
+                # Manually create the symlink for auto-start
+                default_target_dir = service_dir / "default.target.wants"
+                symlink_path = default_target_dir / "guardian_agent.service"
+
+                # Create the default.target.wants directory if it doesn't exist
+                if not default_target_dir.exists():
+                    logger.debug(
+                        f"Creating default.target.wants directory for {username}"
+                    )
+                    default_target_dir.mkdir(mode=0o755, exist_ok=True)
+                    os.chown(default_target_dir, user_info.pw_uid, user_info.pw_gid)
+
+                # Create the symlink if it doesn't exist and service file exists
+                if service_file.exists() and not symlink_path.exists():
+                    logger.info(
+                        f"Creating autostart symlink for guardian_agent.service for {username}"
+                    )
+                    try:
+                        # Need to use relative path for the symlink target
+                        os.symlink("../guardian_agent.service", symlink_path)
+                        os.chown(
+                            symlink_path,
+                            user_info.pw_uid,
+                            user_info.pw_gid,
+                            follow_symlinks=False,
                         )
-                        service_dir.mkdir(parents=True, exist_ok=True)
-                        shutil.copy(SOURCE_SERVICE_FILE, service_file)
-                        chown_recursive(service_dir, user_info.pw_uid, user_info.pw_gid)
+                        logger.info(
+                            f"Successfully enabled guardian_agent service for {username}"
+                        )
+                    except FileExistsError:
+                        logger.debug(
+                            f"Symlink for guardian_agent.service already exists for {username}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to create symlink for {username}: {e}")
 
         except KeyError:
             logger.error(f"User '{username}' not found, cannot ensure systemd service.")

@@ -57,25 +57,41 @@ class SessionTracker:
         Discover current org.guardian.Agent D-Bus names for the given user by listing names on the system bus.
         Returns a list of matching D-Bus names.
         """
+        from dbus_next import DBusError
         from dbus_next.aio import MessageBus
         from dbus_next.constants import BusType
 
-        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-        # Use the standard D-Bus interface to list names
-        introspection = await bus.introspect(
-            "org.freedesktop.DBus", "/org/freedesktop/DBus"
-        )
-        obj = bus.get_proxy_object(
-            "org.freedesktop.DBus", "/org/freedesktop/DBus", introspection
-        )
-        iface = obj.get_interface("org.freedesktop.DBus")
-        names = await iface.call_list_names()
-        # Filter for agent prefix and username
-        return [
-            name
-            for name in names
-            if name.startswith("org.guardian.Agent") and username in name
-        ]
+        try:
+            bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+            # Use the standard D-Bus interface to list names
+            introspection = await bus.introspect(
+                "org.freedesktop.DBus", "/org/freedesktop/DBus"
+            )
+            obj = bus.get_proxy_object(
+                "org.freedesktop.DBus", "/org/freedesktop/DBus", introspection
+            )
+            iface = obj.get_interface("org.freedesktop.DBus")
+            names = await iface.call_list_names()
+
+            # Filter for agent prefix and username
+            agent_names = [
+                name
+                for name in names
+                if name.startswith("org.guardian.Agent") and username in name
+            ]
+
+            if agent_names:
+                logger.debug(
+                    f"Found {len(agent_names)} agent(s) for user {username}: {agent_names}"
+                )
+
+            return agent_names
+        except DBusError as e:
+            logger.error(f"D-Bus error discovering agents for {username}: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error discovering agents for {username}: {e}")
+            return []
 
     def get_agent_paths_for_user(self, username: str):
         """
@@ -301,9 +317,10 @@ class SessionTracker:
         # Ensure user account setup - user already exists since we have a login event
         self.user_manager.write_time_rules()
 
-        # Setup user service and ensure it's running
+        # For login events, we only need to call ensure_systemd_user_service
+        # which will handle both setup and activation of the agent service
+        logger.info(f"Ensuring guardian agent service is running for {username}")
         # We know the user exists because we have a login event
-        self.user_manager.setup_user_service(username)
         self.user_manager.ensure_systemd_user_service(username)
 
         # Optionally start agent for user (if not managed by systemd)
