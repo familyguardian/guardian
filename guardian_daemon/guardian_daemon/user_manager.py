@@ -477,15 +477,34 @@ class UserManager:
 
             # Create directory structure with proper permissions at each step
             try:
+                # Create directory structure step by step to ensure correct ownership
                 # First create .config if needed and set permissions
                 if not config_path.exists():
                     logger.debug(f"Creating .config directory for {username}")
                     config_path.mkdir(mode=0o755, exist_ok=True)
                     os.chown(config_path, user_info.pw_uid, user_info.pw_gid)
 
-                # Then create .config/systemd/user with proper permissions
-                user_systemd_path.mkdir(parents=True, exist_ok=True)
-                os.chown(user_systemd_path, user_info.pw_uid, user_info.pw_gid)
+                # Create systemd directory and set ownership
+                systemd_path = config_path / "systemd"
+                if not systemd_path.exists():
+                    logger.debug(f"Creating systemd directory for {username}")
+                    systemd_path.mkdir(mode=0o755, exist_ok=True)
+                    os.chown(systemd_path, user_info.pw_uid, user_info.pw_gid)
+
+                # Create user directory and set ownership
+                if not user_systemd_path.exists():
+                    logger.debug(f"Creating systemd/user directory for {username}")
+                    user_systemd_path.mkdir(mode=0o755, exist_ok=True)
+                    os.chown(user_systemd_path, user_info.pw_uid, user_info.pw_gid)
+
+                # Fix ownership of any existing directories that might have wrong permissions
+                for path in [config_path, systemd_path, user_systemd_path]:
+                    if path.exists() and (
+                        path.stat().st_uid != user_info.pw_uid
+                        or path.stat().st_gid != user_info.pw_gid
+                    ):
+                        logger.debug(f"Fixing ownership of {path} for user {username}")
+                        os.chown(path, user_info.pw_uid, user_info.pw_gid)
 
                 # Copy the service file and set permissions
                 shutil.copy(SOURCE_SERVICE_FILE, service_file_path)
