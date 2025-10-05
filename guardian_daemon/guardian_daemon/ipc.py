@@ -202,9 +202,9 @@ class GuardianIPCServer:
         return json.dumps(
             {
                 "kid": kid,
-                "used": round(used_time / 60, 2),  # minutes
-                "limit": round(total_time / 60, 2),  # minutes
-                "remaining": round(remaining_time / 60, 2),  # minutes
+                "used": round(used_time, 1),  # already in minutes
+                "limit": round(total_time, 1),  # already in minutes
+                "remaining": round(remaining_time, 1),  # already in minutes
             }
         )
 

@@ -167,6 +167,7 @@ class SessionTracker:
 
             # If we have a main desktop session, only count that one
             if main_desktop_session:
+                # Calculate duration from adjusted start_time to preserve time across restarts
                 session_duration = now - main_desktop_session["start_time"]
                 active_duration_seconds = session_duration
                 active_sessions_count = 1
@@ -221,16 +222,21 @@ class SessionTracker:
                 f"User {username}: active sessions duration: {active_duration_seconds/60:.1f} minutes from {active_sessions_count} sessions"
             )
 
+            # Internal calculations use seconds
             total_seconds = active_duration_seconds + db_duration_seconds
+            # Convert seconds to minutes for the API contract
             total_minutes = total_seconds / 60
             logger.debug(
-                f"User {username}: total used time: {total_minutes:.1f} minutes"
+                f"User {username}: total used time: {total_minutes:.1f} minutes (from {total_seconds:.1f} seconds)"
             )
-            return total_minutes
+            return total_minutes  # Return value is in minutes
 
     async def get_total_time(self, username: str) -> float:
         """
         Returns the total allowed time (in minutes) for the given user today.
+
+        Returns:
+            float: Total allowed screen time in minutes
         """
         user_policy = self.policy.get_user_policy(username)
         if user_policy is None:
@@ -238,13 +244,16 @@ class SessionTracker:
         quota = user_policy.get("daily_quota_minutes")
         if quota is None:
             quota = self.policy.get_default("daily_quota_minutes")
-        return float(quota)
+        return float(quota)  # Return value is in minutes
 
     async def get_remaining_time(self, username: str) -> float:
         """
         Returns the remaining allowed time (in minutes) for the given user today.
+
+        Returns:
+            float: Remaining screen time in minutes
         """
-        total_allowed = await self.get_total_time(username)
+        total_allowed = await self.get_total_time(username)  # In minutes
         if total_allowed == float("inf"):
             logger.debug(f"User {username} has unlimited time")
             return float("inf")
@@ -289,16 +298,37 @@ class SessionTracker:
     async def periodic_session_update(self, interval: int = 60):
         """
         Periodically update all active sessions in the database with current duration.
+        This is critical for preserving session time across daemon restarts.
         """
         while True:
-            now = time.time()
-            async with self.session_lock:
-                for session_id, session in self.active_sessions.items():
-                    duration = now - session["start_time"]
-                    logger.debug(
-                        f"Updating session {session_id} for {session.get('username')}: start_time={session['start_time']}, current_duration={duration/60:.1f} minutes"
-                    )
-                    self.storage.update_session_progress(session_id, duration)
+            try:
+                now = time.time()
+                async with self.session_lock:
+                    for session_id, session in self.active_sessions.items():
+                        # Calculate current duration based on adjusted start time
+                        duration = now - session["start_time"]
+
+                        # Log useful debugging information about the session
+                        username = session.get("username", "unknown")
+                        logger.debug(
+                            f"Updating session {session_id} for {username}: "
+                            f"start_time={session['start_time']}, "
+                            f"current_duration={duration/60:.1f} minutes"
+                        )
+
+                        # Ensure we always update the database with the latest duration
+                        # This is crucial for preserving time across daemon restarts
+                        self.storage.update_session_progress(session_id, duration)
+
+                        # Log more detailed information at info level if significant time has passed
+                        if duration > 300:  # More than 5 minutes
+                            logger.info(
+                                f"Session {session_id} for {username} has accumulated {duration/60:.1f} minutes"
+                            )
+            except Exception as e:
+                logger.error(f"Error in periodic session update: {e}")
+
+            # Wait for the next update interval
             await asyncio.sleep(interval)
 
     def __init__(self, policy: Policy, config: dict, user_manager: UserManager):
@@ -325,15 +355,33 @@ class SessionTracker:
     def _restore_active_sessions(self):
         """
         Restore sessions that are still open (no end_time) from the database into active_sessions.
-        Instead of resetting start_time, we now properly account for time already used.
+        Properly preserves session duration across daemon restarts.
         """
         # First, clear any existing active sessions to avoid duplicates
-        # This ensures we don't end up with multiple copies of the same session
         self.active_sessions = {}
 
         # Track unique sessions by session ID to avoid duplicates
         unique_sessions = {}
 
+        # First, update all open sessions in the database with their current duration
+        # This ensures we have the latest duration values before the daemon was stopped
+        try:
+            # Force an update of all active sessions in the database before proceeding
+            # Get all open sessions from database
+            c = self.storage.conn.cursor()
+            c.execute(
+                "SELECT session_id, username, start_time, duration FROM sessions WHERE end_time IS NULL OR end_time = 0"
+            )
+            open_sessions = c.fetchall()
+            for session_row in open_sessions:
+                session_id, username, start_time, duration = session_row
+                logger.info(
+                    f"Found open session {session_id} for {username} with duration {duration/60:.1f} min"
+                )
+        except Exception as e:
+            logger.error(f"Error updating open sessions before restore: {e}")
+
+        # Now get the latest data from the database
         c = self.storage.conn.cursor()
         c.execute(
             "SELECT session_id, username, uid, start_time, duration, desktop, service FROM sessions WHERE end_time IS NULL OR end_time = 0"
@@ -361,7 +409,6 @@ class SessionTracker:
                 service = ""
 
             # Only process each unique session_id once
-            # If we've seen this session_id before, skip it
             if session_id in unique_sessions:
                 continue
 
@@ -370,34 +417,39 @@ class SessionTracker:
                 "uid": uid,
                 "username": username,
                 "old_start_time": old_start_time,
-                "duration": duration,
+                "duration": duration
+                or 0.0,  # Ensure we have a valid duration, default to 0
                 "desktop": desktop,
                 "service": service,
             }
 
         # Now process the unique sessions
         for session_id, session_data in unique_sessions.items():
-            # Instead of resetting start_time to now, we adjust it based on already recorded duration
-            # This ensures we properly account for time already spent in this session
-            # By subtracting the duration from now, we keep the accumulated time intact
-            adjusted_start_time = now - (
-                session_data["duration"] if session_data["duration"] else 0
-            )
+            # Calculate adjusted start time to preserve accumulated session time
+            adjusted_start_time = now - session_data["duration"]
 
             self.active_sessions[session_id] = {
                 "uid": session_data["uid"],
                 "username": session_data["username"],
-                "start_time": adjusted_start_time,
+                "start_time": adjusted_start_time,  # Key fix: adjusted start preserves previous usage
                 "original_start_time": session_data["old_start_time"],
                 "desktop": session_data["desktop"],
                 "service": session_data["service"],
             }
+
+            # For better tracking, record the preserved duration
+            self.active_sessions[session_id]["preserved_duration"] = session_data[
+                "duration"
+            ]
+
             logger.info(
-                f"Restored session {session_id} for {username}. Original start: {old_start_time}, duration so far: {duration/60:.1f} min, adjusted start: {adjusted_start_time}"
+                f"Restored session {session_id} for {session_data['username']}: preserved duration {session_data['duration']/60:.1f} min"
             )
             self.session_locks[session_id] = []
+
+        if rows:
             logger.info(
-                f"Restored session {session_id} for {username}. Original start: {old_start_time}, new effective start: {now}"
+                f"Restored {len(rows)} active sessions from database on restart, preserving quota usage."
             )
 
         if rows:

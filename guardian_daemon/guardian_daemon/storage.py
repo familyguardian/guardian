@@ -46,18 +46,41 @@ class Storage:
     def update_session_progress(self, session_id: str, duration: float):
         """
         Periodically update session entry with current duration (while session is active).
+        This is critical for preserving session time across daemon restarts.
         """
         c = self.conn.cursor()
-        logger.debug(
-            f"Updating session progress for session_id: {session_id}, duration: {duration}"
+
+        # Verify the session exists and is still active
+        c.execute(
+            "SELECT session_id FROM sessions WHERE session_id = ? AND (end_time = 0 OR end_time IS NULL)",
+            (session_id,),
         )
+        if not c.fetchone():
+            logger.warning(
+                f"Cannot update non-existent or closed session: {session_id}"
+            )
+            return
+
+        # Update the duration, ensuring we don't accidentally decrease it
+        # This prevents any race conditions or timing issues from reducing tracked time
         c.execute(
             """
-            UPDATE sessions SET duration = ? WHERE session_id = ? AND (end_time = 0 OR end_time IS NULL)
+            UPDATE sessions
+            SET duration = CASE
+                WHEN ? > duration OR duration IS NULL THEN ?
+                ELSE duration
+            END
+            WHERE session_id = ? AND (end_time = 0 OR end_time IS NULL)
             """,
-            (duration, session_id),
+            (duration, duration, session_id),
         )
+
+        # Commit immediately to ensure data is persisted
         self.conn.commit()
+
+        logger.debug(
+            f"Updated session progress for session_id: {session_id}, duration: {duration/60:.1f} min"
+        )
 
     def get_user_settings(self, username: str) -> Optional[dict]:
         """
