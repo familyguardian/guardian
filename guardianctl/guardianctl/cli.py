@@ -106,13 +106,21 @@ def register_dynamic_commands():
         @app.command()
         def help():
             """Show help for all commands."""
-            # Use typer's built-in help display - same as running with --help flag
-            from click.testing import CliRunner
+            # Use typer's built-in help
 
-            # Use click's CliRunner to simulate running with --help
-            runner = CliRunner()
-            result = runner.invoke(app, ["--help"], color=True)
-            typer.echo(result.output)
+            # Pass --help to the app (which will cause it to print help and exit)
+            # We'll redirect the help output to be part of our command
+            from contextlib import redirect_stdout
+            import io
+
+            f = io.StringIO()
+            with redirect_stdout(f):
+                try:
+                    app(["--help"], standalone_mode=False)
+                except SystemExit:
+                    pass
+
+            typer.echo(f.getvalue())
 
 
 def create_command(app_instance, cli_name, ipc_name, description, params):
