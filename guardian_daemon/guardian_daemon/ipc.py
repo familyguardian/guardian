@@ -300,18 +300,30 @@ class GuardianIPCServer:
     def handle_describe_commands(self, _):
         """
         Returns a description of all available IPC commands and their parameters as JSON.
+        This is used by the CLI for automatic command discovery.
         """
         commands = {}
         for cmd, handler in self.handlers.items():
-            desc = handler.__doc__.strip() if handler.__doc__ else ""
+            # Extract and clean up docstring
+            desc = ""
+            if handler.__doc__:
+                desc = handler.__doc__.strip().split("\n")[0]  # First line only
 
+            # Get function signature parameters
             sig = inspect.signature(handler)
             params = [
                 p.name
                 for p in sig.parameters.values()
                 if p.name != "self" and p.name != "_"
             ]
-            commands[cmd] = {"description": desc, "params": params}
+
+            # Create command info
+            commands[cmd] = {
+                "description": desc,
+                "params": params,
+                "is_async": asyncio.iscoroutinefunction(handler),
+            }
+
         logger.debug(f"Describing IPC commands: {list(commands.keys())}")
         return json.dumps(commands)
 
