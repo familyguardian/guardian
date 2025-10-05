@@ -56,8 +56,11 @@ def get_ipc_commands():
 
 # Dynamisch generierte Typer-Kommandos
 for cmd, meta in get_ipc_commands().items():
+    params = []
+    if isinstance(meta, dict) and "params" in meta:
+        params = meta["params"]
 
-    def make_cmd(cmd_name, params):
+    def make_cmd(cmd_name, cmd_params):
         """
         Create a Typer command for the given IPC command name and parameters.
         """
@@ -72,10 +75,8 @@ for cmd, meta in get_ipc_commands().items():
         return _cmd
 
     # Typer benötigt die Parameter als Funktionsargumente
-    param_defs = {p: typer.Option(None, help=f"Parameter {p}") for p in meta["params"]}
-    app.command(name=cmd)(
-        typer.main.get_command(make_cmd(cmd, meta["params"]), param_defs)
-    )
+    param_defs = {p: typer.Option(None, help=f"Parameter {p}") for p in params}
+    app.command(name=cmd)(typer.main.get_command(make_cmd(cmd, params), param_defs))
 
 if __name__ == "__main__":
     app()
