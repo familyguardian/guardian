@@ -610,7 +610,8 @@ class UserManager:
     def _run_systemctl_user_command(self, username, *args):
         """Helper to run systemctl --user commands for a given user.
 
-        Uses runuser to execute commands as the target user with proper environment.
+        Uses runuser to execute commands as the target user with minimal environment variables.
+        Avoids using login shell (-l) to prevent issues with profile scripts (like Nobara's).
         Handles common error cases and logs appropriate messages.
         """
         try:
@@ -618,26 +619,32 @@ class UserManager:
             user_info = pwd.getpwnam(username)
             uid = user_info.pw_uid
 
-            # Set up the environment variables needed for systemd user commands
-            # This ensures systemd can find the user's socket even if they don't have an active session
-            env_setup = f"export XDG_RUNTIME_DIR=/run/user/{uid}; export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus;"
+            # Set up environment variables directly for subprocess instead of exporting them in shell
+            clean_env = {
+                "XDG_RUNTIME_DIR": f"/run/user/{uid}",
+                "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus",
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",  # Minimal PATH
+                "HOME": user_info.pw_dir,
+                "USER": username,
+            }
 
-            # Build the complete command with environment setup
+            # Build the command to run systemctl directly, without using a shell
             command = [
                 "runuser",
-                "-l",  # Login shell to get user's environment
+                # No -l flag to avoid loading profile scripts
                 username,
                 "-c",
-                f"{env_setup} systemctl --user {' '.join(args)}",
+                f"systemctl --user {' '.join(args)}",
             ]
 
-            # Run the command with a reasonable timeout
+            # Run the command with a reasonable timeout and clean environment
             result = subprocess.run(
                 command,
                 check=True,
                 capture_output=True,
                 text=True,
                 timeout=10,  # Add timeout to avoid hanging
+                env=clean_env,  # Pass clean environment variables
             )
             return result
 
