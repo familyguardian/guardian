@@ -39,18 +39,18 @@ defaults:
 
 users:
   # Individuelle Einstellungen pro Kind/Nutzer
-  kid1: {} # bekommt die Defaults
+  # kid1: {} # bekommt die Defaults
 
-  kid2:
-    # Tageskontingent für kid2 (Minuten)
-    daily_quota_minutes: 60
-    # Eigene Curfew-Zeiten für kid2
-    curfew:
-      weekdays: "07:30-19:30"
-      saturday: "08:00-21:00"
-      sunday: "09:00-19:00"
-    # Bonuszeit, die für kid2 vergeben werden kann
-    bonus_pool_minutes: 15
+  # kid2:
+  # # Tageskontingent für kid2 (Minuten)
+  # daily_quota_minutes: 60
+  # # Eigene Curfew-Zeiten für kid2
+  # curfew:
+  #     weekdays: "07:30-19:30"
+  #     saturday: "08:00-21:00"
+  #     sunday: "09:00-19:00"
+  # # Bonuszeit, die für kid2 vergeben werden kann
+  # bonus_pool_minutes: 15
 
 # Weitere Optionen können ergänzt werden:
 # - allowlist: Liste erlaubter Programme/Apps (z.B. nur bestimmte Spiele oder Lernsoftware)
