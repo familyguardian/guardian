@@ -85,11 +85,11 @@ def register_dynamic_commands():
             err=True,
         )
         typer.echo(
-            "Use 'status', 'logs', or 'socket-check' commands to diagnose the issue with the daemon.",
+            "Use 'status', 'logs', 'socket-check', 'config-check', or 'restart-daemon' commands to diagnose the issue with the daemon.",
             err=True,
         )
         typer.echo("", err=True)  # Empty line for better formatting
-        register_basic_commands()
+        register_diagnostic_commands()
         return
 
     for cmd_name, cmd_info in commands.items():
@@ -177,10 +177,10 @@ def create_command(app_instance, cli_name, ipc_name, description, params):
         cmd_without_param.__doc__ = description
 
 
-def register_basic_commands():
+def register_diagnostic_commands():
     """
     Register diagnostic commands for when we can't connect to the daemon.
-    These commands help diagnose the issue with the daemon connection.
+    These commands help diagnose and troubleshoot issues with the daemon connection.
     """
     import os
     import subprocess
@@ -193,58 +193,154 @@ def register_basic_commands():
 
         # Run systemctl command to check daemon status
         try:
-            # First try as normal user with sudo
-            cmd = ["sudo", "systemctl", "status", "guardian_daemon.service"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            # Try different approaches for systemctl
+            cmds = [
+                [
+                    "systemctl",
+                    "status",
+                    "guardian_daemon.service",
+                ],  # Try without sudo first
+                [
+                    "sudo",
+                    "-n",
+                    "systemctl",
+                    "status",
+                    "guardian_daemon.service",
+                ],  # sudo with non-interactive flag
+                [
+                    "sudo",
+                    "systemctl",
+                    "status",
+                    "guardian_daemon.service",
+                ],  # regular sudo (may prompt)
+            ]
 
-            if result.returncode == 0:
-                typer.echo(result.stdout)
-            else:
-                typer.echo(f"Error getting daemon status: {result.stderr}")
-                typer.echo("\nTrying without sudo...")
+            success = False
+            for cmd in cmds:
+                try:
+                    typer.echo(f"Running: {' '.join(cmd)}")
+                    result = subprocess.run(
+                        cmd, capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0 or "Active:" in result.stdout:
+                        typer.echo(result.stdout)
+                        success = True
+                        break
+                except Exception as e:
+                    typer.echo(f"Command failed: {e}")
+                    continue
 
-                # Try without sudo as fallback
-                cmd = ["systemctl", "status", "guardian_daemon.service"]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    typer.echo(result.stdout)
-                else:
-                    typer.echo("Failed to get daemon status with or without sudo.")
+            if not success:
+                # As a last resort, try checking if process is running
+                try:
+                    ps_cmd = [
+                        "ps",
+                        "-ef",
+                        "|",
+                        "grep",
+                        "guardian_daemon",
+                        "|",
+                        "grep",
+                        "-v",
+                        "grep",
+                    ]
+                    typer.echo("Checking if daemon process is running...")
+                    ps_result = subprocess.run(
+                        " ".join(ps_cmd), shell=True, capture_output=True, text=True
+                    )
+                    if "guardian_daemon" in ps_result.stdout:
+                        typer.echo("✅ Guardian daemon process appears to be running:")
+                        typer.echo(ps_result.stdout)
+                    else:
+                        typer.echo(
+                            "❌ Guardian daemon process does not appear to be running."
+                        )
+                except Exception as ps_error:
+                    typer.echo(f"Error checking process status: {str(ps_error)}")
         except subprocess.TimeoutExpired:
             typer.echo("Command timed out while checking daemon status.")
         except Exception as e:
             typer.echo(f"Error checking daemon status: {str(e)}")
 
     @app.command(name="logs")
-    def daemon_logs(lines: int = 20):
+    def daemon_logs(
+        lines: int = typer.Option(
+            20, "--lines", "-n", help="Number of log lines to show"
+        )
+    ):
         """Show recent logs from the guardian daemon."""
         typer.echo(f"Showing last {lines} lines of guardian daemon logs...\n")
 
         try:
-            # Try with sudo first
-            cmd = [
-                "sudo",
-                "journalctl",
-                "-u",
-                "guardian_daemon.service",
-                "-n",
-                str(lines),
+            # Try different approaches for journalctl
+            cmds = [
+                [
+                    "journalctl",
+                    "-u",
+                    "guardian_daemon.service",
+                    "-n",
+                    str(lines),
+                ],  # Try without sudo first
+                [
+                    "sudo",
+                    "-n",
+                    "journalctl",
+                    "-u",
+                    "guardian_daemon.service",
+                    "-n",
+                    str(lines),
+                ],  # sudo with non-interactive
+                [
+                    "sudo",
+                    "journalctl",
+                    "-u",
+                    "guardian_daemon.service",
+                    "-n",
+                    str(lines),
+                ],  # regular sudo (may prompt)
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
 
-            if result.returncode == 0:
-                typer.echo(result.stdout)
-            else:
-                typer.echo(f"Error fetching daemon logs: {result.stderr}")
-                typer.echo("\nTrying without sudo...")
+            success = False
+            for cmd in cmds:
+                try:
+                    typer.echo(f"Running: {' '.join(cmd)}")
+                    result = subprocess.run(
+                        cmd, capture_output=True, text=True, timeout=10
+                    )
+                    if result.returncode == 0 or result.stdout.strip():
+                        typer.echo(result.stdout)
+                        success = True
+                        break
+                    else:
+                        typer.echo(
+                            f"Command returned no output or error: {result.stderr}"
+                        )
+                except Exception as cmd_error:
+                    typer.echo(f"Command failed: {cmd_error}")
+                    continue
 
-                # Try without sudo as fallback
-                cmd = ["journalctl", "-u", "guardian_daemon.service", "-n", str(lines)]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    typer.echo(result.stdout)
-                else:
-                    typer.echo("Failed to get daemon logs with or without sudo.")
+            if not success:
+                # As a last resort, check syslog for guardian daemon mentions
+                typer.echo("Trying to find guardian daemon logs in system logs...")
+                try:
+                    syslog_cmd = [
+                        "grep",
+                        "guardian_daemon",
+                        "/var/log/syslog",
+                        "|",
+                        "tail",
+                        f"-{lines}",
+                    ]
+                    syslog_result = subprocess.run(
+                        " ".join(syslog_cmd), shell=True, capture_output=True, text=True
+                    )
+                    if syslog_result.stdout.strip():
+                        typer.echo("Found guardian daemon mentions in syslog:")
+                        typer.echo(syslog_result.stdout)
+                    else:
+                        typer.echo("No guardian daemon mentions found in syslog.")
+                except Exception as syslog_error:
+                    typer.echo(f"Error checking syslog: {str(syslog_error)}")
         except subprocess.TimeoutExpired:
             typer.echo("Command timed out while fetching daemon logs.")
         except Exception as e:
@@ -295,27 +391,196 @@ def register_basic_commands():
         typer.echo("Attempting to restart the Guardian daemon...")
 
         try:
-            # First try with sudo
-            cmd = ["sudo", "systemctl", "restart", "guardian_daemon.service"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            # Try different approaches
+            cmds = [
+                [
+                    "sudo",
+                    "-n",
+                    "systemctl",
+                    "restart",
+                    "guardian_daemon.service",
+                ],  # Try non-interactive sudo first
+                [
+                    "sudo",
+                    "systemctl",
+                    "restart",
+                    "guardian_daemon.service",
+                ],  # Then interactive sudo
+                [
+                    "pkill",
+                    "-f",
+                    "guardian_daemon",
+                    "&&",
+                    "sleep",
+                    "1",
+                    "&&",
+                    "sudo",
+                    "systemctl",
+                    "start",
+                    "guardian_daemon.service",
+                ],  # Last resort
+            ]
 
-            if result.returncode == 0:
-                typer.echo("✅ Guardian daemon restarted successfully!")
+            success = False
+            for idx, cmd in enumerate(cmds):
+                try:
+                    if idx < 2:  # Standard commands
+                        typer.echo(f"Running: {' '.join(cmd)}")
+                        result = subprocess.run(
+                            cmd, capture_output=True, text=True, timeout=10
+                        )
+                        if result.returncode == 0:
+                            success = True
+                            typer.echo("✅ Guardian daemon restart command succeeded!")
+                            break
+                        else:
+                            typer.echo(f"Command failed: {result.stderr}")
+                    else:  # Last resort with shell command
+                        typer.echo("Attempting restart via process kill...")
+                        shell_cmd = " ".join(cmd)
+                        result = subprocess.run(
+                            shell_cmd,
+                            shell=True,
+                            capture_output=True,
+                            text=True,
+                            timeout=10,
+                        )
+                        if result.returncode == 0:
+                            success = True
+                            typer.echo("✅ Guardian daemon process restarted!")
+                            break
+                except Exception as cmd_error:
+                    typer.echo(f"Command failed: {cmd_error}")
+                    continue
+
+            if success:
                 typer.echo("\nChecking daemon status after restart...")
+                try:
+                    # Wait a moment for the service to fully start
+                    import time
 
-                # Check status after restart
-                status_cmd = ["sudo", "systemctl", "status", "guardian_daemon.service"]
-                status_result = subprocess.run(
-                    status_cmd, capture_output=True, text=True, timeout=5
-                )
-                typer.echo(status_result.stdout)
+                    time.sleep(2)
+
+                    status_cmd = ["systemctl", "status", "guardian_daemon.service"]
+                    status_result = subprocess.run(
+                        status_cmd, capture_output=True, text=True, timeout=5
+                    )
+                    typer.echo(status_result.stdout)
+
+                    # Also check for the socket
+                    if os.path.exists(IPC_SOCKET):
+                        typer.echo(f"✅ Guardian daemon socket {IPC_SOCKET} exists")
+                    else:
+                        typer.echo(
+                            f"❌ Guardian daemon socket {IPC_SOCKET} does not exist"
+                        )
+                except Exception as status_error:
+                    typer.echo(
+                        f"Error checking status after restart: {str(status_error)}"
+                    )
             else:
-                typer.echo(f"❌ Failed to restart daemon: {result.stderr}")
-                typer.echo("You may not have the necessary permissions.")
+                typer.echo(
+                    "❌ Failed to restart daemon. You may not have the necessary permissions."
+                )
+                typer.echo(
+                    "Try running with sudo privileges or contact system administrator."
+                )
         except subprocess.TimeoutExpired:
             typer.echo("Command timed out while restarting daemon.")
         except Exception as e:
             typer.echo(f"Error restarting daemon: {str(e)}")
+
+    @app.command(name="config-check")
+    def config_check():
+        """Check the guardian daemon configuration."""
+        import yaml
+
+        typer.echo("Checking Guardian daemon configuration...\n")
+
+        # Configuration paths
+        default_config_path = "/usr/local/guardian/guardian_daemon/default-config.yaml"
+        system_config_path = "/etc/guardian/daemon/config.yaml"
+
+        try:
+            # Check if config files exist
+            default_exists = os.path.exists(default_config_path)
+            system_exists = os.path.exists(system_config_path)
+
+            typer.echo(f"Default config file: {default_config_path}")
+            typer.echo(f"  Exists: {'✅ Yes' if default_exists else '❌ No'}")
+
+            typer.echo(f"System config file: {system_config_path}")
+            typer.echo(f"  Exists: {'✅ Yes' if system_exists else '❌ No'}")
+
+            # Check config file contents if they exist
+            if default_exists:
+                try:
+                    # Try to read file permissions
+                    default_stats = os.stat(default_config_path)
+                    default_perms = oct(default_stats.st_mode)[-3:]
+                    typer.echo(f"  Permissions: {default_perms}")
+
+                    # Try to parse YAML
+                    try:
+                        with open(default_config_path, "r") as f:
+                            default_config = yaml.safe_load(f)
+                        typer.echo("  YAML format: ✅ Valid")
+                        typer.echo(
+                            f"  Top-level keys: {', '.join(default_config.keys())}"
+                        )
+                    except Exception as yaml_err:
+                        typer.echo(f"  YAML format: ❌ Invalid - {str(yaml_err)}")
+                except Exception as stat_err:
+                    typer.echo(f"  Error accessing file: {str(stat_err)}")
+
+            if system_exists:
+                try:
+                    # Try to read file permissions
+                    system_stats = os.stat(system_config_path)
+                    system_perms = oct(system_stats.st_mode)[-3:]
+                    typer.echo(f"  Permissions: {system_perms}")
+
+                    # Try to parse YAML
+                    try:
+                        with open(system_config_path, "r") as f:
+                            system_config = yaml.safe_load(f)
+                        typer.echo("  YAML format: ✅ Valid")
+                        typer.echo(
+                            f"  Top-level keys: {', '.join(system_config.keys())}"
+                        )
+
+                        # Check for users section
+                        if "users" in system_config:
+                            users = system_config["users"]
+                            typer.echo(
+                                f"  User entries: {len(users)} ({'default' in users and 'default user present' or 'no default user'})"
+                            )
+                    except Exception as yaml_err:
+                        typer.echo(f"  YAML format: ❌ Invalid - {str(yaml_err)}")
+                except Exception as stat_err:
+                    typer.echo(f"  Error accessing file: {str(stat_err)}")
+
+            # Check database
+            db_path = "/var/lib/guardian/guardian.sqlite"
+            db_exists = os.path.exists(db_path)
+            typer.echo(f"\nDatabase file: {db_path}")
+            typer.echo(f"  Exists: {'✅ Yes' if db_exists else '❌ No'}")
+
+            if db_exists:
+                try:
+                    db_stats = os.stat(db_path)
+                    db_perms = oct(db_stats.st_mode)[-3:]
+                    db_size = db_stats.st_size / 1024  # Size in KB
+                    typer.echo(f"  Permissions: {db_perms}")
+                    typer.echo(f"  Size: {db_size:.2f} KB")
+                    typer.echo(
+                        f"  Last modified: {datetime.fromtimestamp(db_stats.st_mtime)}"
+                    )
+                except Exception as db_err:
+                    typer.echo(f"  Error accessing database: {str(db_err)}")
+
+        except Exception as e:
+            typer.echo(f"Error checking configuration: {str(e)}")
 
 
 # Register commands at module load time
