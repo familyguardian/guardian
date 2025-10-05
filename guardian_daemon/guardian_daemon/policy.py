@@ -93,6 +93,29 @@ class Policy:
         logger.debug(f"Retrieved {len(users)} users from policy")
         return users
 
+    def get_grace_time(self, username: str) -> int:
+        """
+        Returns the grace time in minutes for a user.
+        This is the time allowed after quota is exhausted before terminating the session.
+
+        Args:
+            username (str): Username to get grace time for
+
+        Returns:
+            int: Grace time in minutes (defaults to 5)
+        """
+        user_policy = self.get_user_policy(username)
+        if user_policy and "grace_minutes" in user_policy:
+            return user_policy["grace_minutes"]
+
+        # Fall back to defaults if no specific user setting
+        defaults = self.storage.get_user_settings("default")
+        if defaults and "grace_minutes" in defaults:
+            return defaults["grace_minutes"]
+
+        # Use hardcoded default if nothing else is available
+        return 5  # Default grace period: 5 minutes
+
     def add_user(self, username: str) -> bool:
         """
         Adds a user to the policy with default settings.

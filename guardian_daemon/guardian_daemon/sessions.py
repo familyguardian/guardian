@@ -148,6 +148,15 @@ class SessionTracker:
         """
         Calculates the total used time for a user since the last reset.
         This is an internal method and should be called within a lock.
+
+        Note on time units: All calculations are done in seconds internally,
+        but the final result is converted to minutes before returning.
+
+        Args:
+            username (str): The username to calculate time for
+
+        Returns:
+            float: Total used time in minutes
         """
         async with self.session_lock:
             # First, calculate time for currently active sessions for the user
@@ -248,7 +257,8 @@ class SessionTracker:
 
     async def get_remaining_time(self, username: str) -> float:
         """
-        Returns the remaining allowed time (in minutes) for the given user today.
+        Returns the remaining allowed time for the given user today.
+        All calculations use minutes as the base unit to match the API contract.
 
         Returns:
             float: Remaining screen time in minutes

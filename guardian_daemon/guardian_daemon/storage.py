@@ -43,10 +43,14 @@ class Storage:
                 )
         return boot_time + (logind_timestamp / 1_000_000)
 
-    def update_session_progress(self, session_id: str, duration: float):
+    def update_session_progress(self, session_id: str, duration_seconds: float):
         """
         Periodically update session entry with current duration (while session is active).
         This is critical for preserving session time across daemon restarts.
+
+        Args:
+            session_id (str): The session ID to update
+            duration_seconds (float): Duration in seconds
         """
         c = self.conn.cursor()
 
@@ -72,14 +76,14 @@ class Storage:
             END
             WHERE session_id = ? AND (end_time = 0 OR end_time IS NULL)
             """,
-            (duration, duration, session_id),
+            (duration_seconds, duration_seconds, session_id),
         )
 
         # Commit immediately to ensure data is persisted
         self.conn.commit()
 
         logger.debug(
-            f"Updated session progress for session_id: {session_id}, duration: {duration/60:.1f} min"
+            f"Updated session progress for session_id: {session_id}, duration: {duration_seconds/60:.1f} min (from {duration_seconds:.1f} sec)"
         )
 
     def get_user_settings(self, username: str) -> Optional[dict]:
@@ -118,9 +122,16 @@ class Storage:
         )
         self.conn.commit()
 
-    def update_session_logout(self, session_id: str, end_time: float, duration: float):
+    def update_session_logout(
+        self, session_id: str, end_time: float, duration_seconds: float
+    ):
         """
         Update session entry with logout time and duration.
+
+        Args:
+            session_id (str): Session ID to update
+            end_time (float): End time in EPOCH seconds
+            duration_seconds (float): Session duration in seconds
         """
         c = self.conn.cursor()
         logger.info(f"Updating session logout for session_id: {session_id}")
@@ -128,7 +139,7 @@ class Storage:
             """
             UPDATE sessions SET end_time = ?, duration = ? WHERE session_id = ? AND (end_time = 0 OR end_time IS NULL)
         """,
-            (end_time, duration, session_id),
+            (end_time, duration_seconds, session_id),
         )
         self.conn.commit()
 
@@ -262,7 +273,7 @@ class Storage:
         uid: int,
         start_time: float,
         end_time: float,
-        duration: float,
+        duration_seconds: float,
         desktop: Optional[str] = None,
         service: Optional[str] = None,
     ):
@@ -275,7 +286,7 @@ class Storage:
             uid (int): User ID
             start_time (float): Start time (EPOCH)
             end_time (float): End time (EPOCH)
-            duration (float): Session duration
+            duration_seconds (float): Session duration in seconds
             desktop (str, optional): Desktop environment
             service (str, optional): Service (e.g. sddm)
         """
@@ -299,7 +310,7 @@ class Storage:
                 uid,
                 start_time,
                 end_time,
-                duration,
+                duration_seconds,
                 desktop,
                 service,
             ),

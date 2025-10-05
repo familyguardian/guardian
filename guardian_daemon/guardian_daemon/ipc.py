@@ -179,9 +179,13 @@ class GuardianIPCServer:
     async def handle_get_quota(self, kid):
         """
         Returns the current quota status of a kid.
+        All time values are in minutes in the returned JSON.
 
         Args:
             kid (str): Username
+
+        Returns:
+            str: JSON string with quota information (used, limit, remaining in minutes)
         """
         if not kid:
             logger.warning("get_quota called without kid argument")
@@ -202,9 +206,9 @@ class GuardianIPCServer:
         return json.dumps(
             {
                 "kid": kid,
-                "used": round(used_time, 1),  # already in minutes
-                "limit": round(total_time, 1),  # already in minutes
-                "remaining": round(remaining_time, 1),  # already in minutes
+                "used": round(used_time, 1),  # in minutes (API contract)
+                "limit": round(total_time, 1),  # in minutes (API contract)
+                "remaining": round(remaining_time, 1),  # in minutes (API contract)
             }
         )
 
