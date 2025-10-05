@@ -314,21 +314,10 @@ class SessionTracker:
             }
             self.session_locks[session_id] = []
 
-        # Ensure user account setup - user already exists since we have a login event
-        self.user_manager.write_time_rules()
-
-        # Ensure the user is in both 'kids' and 'users' groups
-        logger.info(f"Ensuring {username} is in required groups")
-        self.user_manager.ensure_kids_group()
-
-        # For login events, we only need to call ensure_systemd_user_service
-        # which will handle both setup and activation of the agent service
-        logger.info(f"Ensuring guardian agent service is running for {username}")
-        # We know the user exists because we have a login event
-        self.user_manager.ensure_systemd_user_service(username)
-
-        # Optionally start agent for user (if not managed by systemd)
-        # os.system(f"runuser -l {username} -c 'guardian_agent &'")
+        # Perform all user setup steps with a single call to UserManager
+        # This handles time rules, group membership, and systemd service setup
+        logger.info(f"Setting up user {username} for login session {session_id}")
+        self.user_manager.setup_user_login(username)
 
         # Create session entry with end_time and duration=0
         async with self.session_lock:

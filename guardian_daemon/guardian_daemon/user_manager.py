@@ -71,15 +71,24 @@ class UserManager:
                 logger.warning(f"User '{username}' does not exist on system.")
                 continue
 
+            # Force refresh group membership to get current state
+            # This is needed to handle cases where the group cache might be outdated
+            try:
+                subprocess.run(
+                    ["getent", "group"], check=True, capture_output=True, text=True
+                )
+            except Exception as e:
+                logger.warning(f"Failed to refresh group cache: {e}")
+
             try:
                 # Get current groups for the user
                 user_groups = [
                     g.gr_name for g in grp.getgrall() if username in g.gr_mem
                 ]
                 # Also get the primary group
-                uid = pwd.getpwnam(username).pw_uid
-                primary_group = grp.getgrgid(uid).gr_name
+                primary_group = grp.getgrgid(pwd.getpwnam(username).pw_gid).gr_name
                 user_groups.append(primary_group)
+                logger.debug(f"Current groups for {username}: {', '.join(user_groups)}")
             except Exception as e:
                 logger.error(f"Could not determine groups for user {username}: {e}")
                 continue
@@ -89,12 +98,40 @@ class UserManager:
                 if group_name not in user_groups:
                     logger.info(f"Adding user '{username}' to group '{group_name}'.")
                     try:
-                        subprocess.run(
+                        # Run usermod with debug output
+                        logger.info(
+                            f"Adding user '{username}' to group '{group_name}' with usermod -aG"
+                        )
+                        result = subprocess.run(
                             ["usermod", "-aG", group_name, username],
                             check=True,
                             capture_output=True,
                             text=True,
                         )
+                        logger.debug(f"usermod output: {result.stdout}")
+
+                        # Verify the user was added to the group
+                        verify_result = subprocess.run(
+                            ["groups", username],
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                        logger.info(
+                            f"After adding to {group_name}, {username}'s groups: {verify_result.stdout.strip()}"
+                        )
+
+                        # Ensure group membership is immediately visible to the system
+                        try:
+                            # Update system group cache
+                            subprocess.run(
+                                ["getent", "group", group_name],
+                                check=True,
+                                capture_output=True,
+                                text=True,
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to refresh group cache: {e}")
                     except subprocess.CalledProcessError as e:
                         logger.error(
                             f"Failed to add user '{username}' to group '{group_name}': {e.stderr}"
@@ -252,7 +289,8 @@ class UserManager:
 
     def setup_dbus_policy(self):
         """
-        Creates /etc/dbus-1/system.d/guardian.conf to allow group 'kids' access to org.guardian.Daemon.
+        Creates /etc/dbus-1/system.d/guardian.conf to allow managed users access to org.guardian.Daemon.
+        Both 'kids' and 'users' groups are given permissions to support transition periods.
         """
         policy_path = Path("/etc/dbus-1/system.d/guardian.conf")
         policy_xml = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
@@ -265,7 +303,7 @@ class UserManager:
                 <allow receive_sender_prefix="org.guardian.Agent"/>
             </policy>
 
-            <!-- Policy for managed users -->
+            <!-- Policy for kids group users -->
             <policy group="kids">
                 <allow own_prefix="org.guardian.Agent"/>
                 <allow send_destination="org.guardian.Daemon"/>
@@ -696,6 +734,37 @@ class UserManager:
             logger.error(f"User '{username}' not found, cannot ensure systemd service.")
         except Exception as e:
             logger.error(f"Failed to ensure systemd user service for {username}: {e}")
+
+    def setup_user_login(self, username: str):
+        """
+        Performs all required setup steps for a user at login.
+        This is the main entry point from SessionTracker when a user logs in.
+
+        This method:
+        1. Updates PAM time rules
+        2. Ensures user is in required groups (kids and users)
+        3. Sets up and activates the user's systemd service
+
+        Args:
+            username (str): Username of the user logging in
+        """
+        if not self.user_exists(username):
+            logger.warning(f"User '{username}' does not exist, cannot set up login.")
+            return False
+
+        # Step 1: Update PAM time rules for all users
+        self.write_time_rules()
+
+        # Step 2: Ensure user is in required groups
+        logger.info(f"Ensuring {username} is in required groups")
+        self.ensure_kids_group()
+
+        # Step 3: Set up and activate systemd user service
+        logger.info(f"Ensuring guardian agent service is running for {username}")
+        self.ensure_systemd_user_service(username)
+
+        logger.info(f"User login setup complete for {username}")
+        return True
 
     def _run_systemctl_user_command(self, username, *args):
         """Helper to run systemctl --user commands for a given user.
