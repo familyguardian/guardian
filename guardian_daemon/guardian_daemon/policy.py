@@ -3,12 +3,9 @@ Policy loader for guardian-daemon.
 Loads and validates settings from a YAML configuration file.
 """
 
-import os
-from pathlib import Path
 from typing import Any, Dict, Optional
 
-import yaml
-
+from guardian_daemon.config import Config
 from guardian_daemon.logging import get_logger
 from guardian_daemon.storage import Storage
 
@@ -22,40 +19,24 @@ class Policy:
     ):
         """
         Initializes the Policy instance.
-        Reads the configuration from a YAML file and synchronizes it with the database.
+        Uses the Config class to read configuration and synchronizes it with the database.
 
         Args:
             config_path (str, optional): Path to the YAML configuration file.
             db_path (str, optional): Path to the SQLite database.
         """
+        # Use the Config class to load configuration
+        config = Config(config_path)
+        self.data = config.data
+        self.config_path = config.config_path
 
-        env_path = os.environ.get("GUARDIAN_DAEMON_CONFIG")
-        # Try config_path, then env_path, then default-config.yaml
-        config_candidates = [config_path, env_path, "config.yaml"]
-        config_candidates = [c for c in config_candidates if c]
-        config_file = None
-        for candidate in config_candidates:
-            candidate_path = Path(candidate)
-            if candidate_path.exists():
-                config_file = candidate_path
-                break
-        if not config_file:
-            # Fallback to default-config.yaml
-            default_path = Path(__file__).parent.parent / "default-config.yaml"
-            if default_path.exists():
-                config_file = default_path
-                logger.warning(f"Config file not found, using default: {default_path}")
-            else:
-                logger.error("No config.yaml or default-config.yaml found!")
-                self.data = {}
-                return
-        self.config_path = config_file
-        logger.info(f"Loading policy from {self.config_path}")
-        with open(self.config_path, "r") as f:
-            self.data = yaml.safe_load(f)
+        logger.info("Policy loaded from configuration")
+
+        # Use provided db_path or get from config
         self.db_path = db_path or self.data.get(
             "db_path", "/var/lib/guardian/guardian.sqlite"
         )
+
         logger.debug(f"Using database path: {self.db_path}")
         self.storage = Storage(self.db_path)
         self.storage.sync_config_to_db(self.data)
@@ -106,9 +87,9 @@ class Policy:
         Reload the policy configuration and synchronize with the database.
         """
 
-        logger.info(f"Reloading policy from {self.config_path}")
-        with open(self.config_path, "r") as f:
-            self.data = yaml.safe_load(f)
+        logger.info("Reloading policy from configuration")
+        config = Config(self.config_path)
+        self.data = config.data
         self.storage.sync_config_to_db(self.data)
         logger.info("Policy reloaded and synchronized to DB")
 

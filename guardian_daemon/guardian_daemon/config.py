@@ -22,21 +22,69 @@ class Config:
     Handles loading, merging, and validating the daemon's configuration.
     """
 
-    def __init__(self, config_dir=None):
-        if config_dir is None:
-            config_dir = os.path.join(os.path.dirname(__file__), "..")
+    def __init__(self, config_path=None):
+        self.config_path = None
+        self.data = {}
 
-        default_path = os.path.join(config_dir, "default-config.yaml")
-        user_path = os.path.join(config_dir, "config.yaml")
+        # Step 1: First locate the default configuration file
+        install_dir = os.path.join(os.path.dirname(__file__), "..")
+        default_path = os.path.join(install_dir, "default-config.yaml")
 
-        self.data = self._load_config(default_path)
-        user_config = self._load_config(user_path)
+        if os.path.exists(default_path):
+            # Always start with the default configuration
+            self.data = self._load_config(default_path)
+            logger.debug(f"Loaded default configuration from: {default_path}")
+        else:
+            logger.warning(f"Default config not found at: {default_path}")
+            # We continue without a default config, but this might lead to validation errors
 
-        if user_config:
-            self._merge_configs(self.data, user_config)
+        # Step 2: Determine which user config to load
+        user_config_path = None
 
-        self._validate_config()
-        logger.info("Configuration loaded and validated successfully.")
+        # First priority: Explicitly provided path
+        if config_path and os.path.exists(config_path):
+            user_config_path = config_path
+            logger.debug(f"Using explicitly provided config path: {config_path}")
+
+        # Second priority: Environment variable
+        elif os.environ.get("GUARDIAN_DAEMON_CONFIG") and os.path.exists(
+            os.environ.get("GUARDIAN_DAEMON_CONFIG")
+        ):
+            user_config_path = os.environ.get("GUARDIAN_DAEMON_CONFIG")
+            logger.debug(f"Using config path from environment: {user_config_path}")
+
+        # Third priority: Persistent system path
+        elif os.path.exists("/etc/guardian/daemon/config.yaml"):
+            user_config_path = "/etc/guardian/daemon/config.yaml"
+            logger.debug(f"Using persistent system config path: {user_config_path}")
+
+        # Fourth priority: Local config (development)
+        elif os.path.exists(os.path.join(install_dir, "config.yaml")):
+            user_config_path = os.path.join(install_dir, "config.yaml")
+            logger.debug(f"Using local config path: {user_config_path}")
+
+        # Step 3: Merge user config into default config if found
+        if user_config_path:
+            user_config = self._load_config(user_config_path)
+            if user_config:
+                self._merge_configs(self.data, user_config)
+                self.config_path = user_config_path
+                logger.info(f"Merged user configuration from: {user_config_path}")
+            else:
+                logger.warning(
+                    f"User config at {user_config_path} was empty or invalid"
+                )
+        else:
+            logger.info("No user configuration found, using default configuration only")
+            self.config_path = default_path
+
+        # Validate the final merged configuration
+        try:
+            self._validate_config()
+            logger.info("Final configuration validated successfully")
+        except ConfigError as e:
+            logger.error(f"Configuration validation failed: {e}")
+            raise
 
     def _load_config(self, path):
         """Loads a YAML configuration file."""

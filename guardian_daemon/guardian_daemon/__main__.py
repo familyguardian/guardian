@@ -83,7 +83,7 @@ class GuardianDaemon:
             for username in active_users:
                 await self.enforcer.enforce_user(username)
 
-    def check_and_recover_reset(self):
+    async def check_and_recover_reset(self):
         """
         Checks at startup whether the last reset was executed and recovers it if necessary.
         """
@@ -102,7 +102,7 @@ class GuardianDaemon:
             last_reset < scheduled_reset_epoch and now_epoch > scheduled_reset_epoch
         ):
             logger.info("Missed daily reset detected. Performing recovery.")
-            self.tracker.perform_daily_reset()
+            await self.tracker.perform_daily_reset()
             self.storage.set_last_reset_timestamp(now_epoch)
         else:
             logger.info("Daily reset already performed or not needed.")
@@ -126,7 +126,7 @@ class GuardianDaemon:
         end_time = curfew.get("end", "09:00")
         self.systemd.create_curfew_timer(start_time, end_time)
         await self.systemd.reload_systemd()
-        self.check_and_recover_reset()
+        await self.check_and_recover_reset()
         await asyncio.gather(
             self.tracker.run(),
             self.periodic_reload(),

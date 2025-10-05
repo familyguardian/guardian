@@ -327,6 +327,46 @@ def install_systemd_units():
         sys.exit(1)
 
 
+def setup_config_directory():
+    """
+    Create persistent configuration directory in /etc/guardian/daemon/ and
+    copy default config if none exists
+    """
+    config_dir = "/etc/guardian/daemon"
+    # Get default config from the installed location
+    daemon_dir = "/usr/local/guardian/guardian_daemon"
+    default_config_path = os.path.join(daemon_dir, "default-config.yaml")
+    # For development setup, try a fallback if the installed version doesn't exist
+    if not os.path.exists(default_config_path):
+        default_config_path = os.path.join(os.path.dirname(__file__), "../guardian_daemon/default-config.yaml")
+    target_config_path = os.path.join(config_dir, "config.yaml")
+
+    log("Setting up persistent configuration directory...")
+    try:
+        # Create directory if it doesn't exist
+        os.makedirs(config_dir, exist_ok=True)
+
+        # Copy default config if target doesn't exist
+        if not os.path.exists(target_config_path):
+            shutil.copy(default_config_path, target_config_path)
+            log(f"Copied default configuration to {target_config_path}")
+        else:
+            log(f"Configuration already exists at {target_config_path}")
+
+        # Set appropriate ownership and permissions
+        shutil.chown(config_dir, user="guardian", group="guardian")
+        os.chmod(config_dir, 0o750)  # drwxr-x---
+        shutil.chown(target_config_path, user="guardian", group="guardian")
+        os.chmod(target_config_path, 0o640)  # -rw-r-----
+
+    except PermissionError:
+        log(f"Permission denied while setting up {config_dir}. Try running as root.")
+        sys.exit(1)
+    except Exception as e:
+        log(f"Failed to set up configuration directory: {e}")
+        sys.exit(1)
+
+
 def install_ctl():
     """
     Install the guardian ctl script to /usr/local/bin/guardian
@@ -380,6 +420,7 @@ if __name__ == "__main__":
     create_guardian_user()
     install_shared_python()
     install_daemon()
+    setup_config_directory()
     install_agent()
     install_systemd_units()
     install_ctl()
