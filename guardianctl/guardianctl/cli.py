@@ -8,6 +8,7 @@ import socket
 from typing import Dict
 
 import typer
+from rich.box import SIMPLE
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -220,7 +221,7 @@ def format_command_output(command, data, param=None):
     # List kids (show users)
     if command == "list_kids":
         if "kids" in data and data["kids"]:
-            table = Table(show_header=False, box=True, expand=True)
+            table = Table(show_header=False, box=SIMPLE, expand=True)
             table.add_column("Users", style="cyan")
 
             sorted_users = sorted(data["kids"])
@@ -243,7 +244,7 @@ def format_command_output(command, data, param=None):
     elif command == "get_quota":
         if "kid" in data:
             # Create a rich table for quota information
-            table = Table(box=True, expand=True)
+            table = Table(box=SIMPLE, expand=True)
             table.add_column("Quota", style="cyan")
             table.add_column("Time (min)", justify="right")
 
@@ -285,7 +286,7 @@ def format_command_output(command, data, param=None):
         if "kid" in data and "curfew" in data:
             curfew = data["curfew"]
 
-            table = Table(box=True, expand=True)
+            table = Table(box=SIMPLE, expand=True)
             table.add_column("Day", style="cyan")
             table.add_column("Allowed Time")
 
@@ -309,7 +310,7 @@ def format_command_output(command, data, param=None):
     # List timers
     elif command == "list_timers":
         if "timers" in data and data["timers"]:
-            table = Table(show_header=False, box=True, expand=True)
+            table = Table(show_header=False, box=SIMPLE, expand=True)
             table.add_column("Timers", style="cyan")
 
             for timer in data["timers"]:
