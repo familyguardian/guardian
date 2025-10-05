@@ -597,7 +597,44 @@ class UserManager:
                     logger.info(
                         f"User {username} is not logged in, service will be enabled at next login"
                     )
-                    # For non-logged-in users, we leave the service file in place but don't try to enable/start
+                    # For non-logged-in users, we need to manually create the symlink to enable the service at next login
+
+                    # Create the default.target.wants directory if it doesn't exist
+                    default_target_dir = user_systemd_path / "default.target.wants"
+                    symlink_path = default_target_dir / "guardian_agent.service"
+
+                    if not default_target_dir.exists():
+                        logger.debug(
+                            f"Creating default.target.wants directory for {username}"
+                        )
+                        default_target_dir.mkdir(mode=0o755, exist_ok=True)
+                        os.chown(default_target_dir, user_info.pw_uid, user_info.pw_gid)
+
+                    # Create the symlink if it doesn't exist
+                    if service_file_path.exists() and not symlink_path.exists():
+                        logger.info(
+                            f"Creating autostart symlink for guardian_agent.service for {username}"
+                        )
+                        try:
+                            # Need to use relative path for the symlink target
+                            os.symlink("../guardian_agent.service", symlink_path)
+                            os.chown(
+                                symlink_path,
+                                user_info.pw_uid,
+                                user_info.pw_gid,
+                                follow_symlinks=False,
+                            )
+                            logger.info(
+                                f"Successfully enabled guardian_agent service for {username}"
+                            )
+                        except FileExistsError:
+                            logger.debug(
+                                f"Symlink for guardian_agent.service already exists for {username}"
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to create symlink for {username}: {e}"
+                            )
             except Exception as e:
                 logger.warning(f"Could not determine login status for {username}: {e}")
 
