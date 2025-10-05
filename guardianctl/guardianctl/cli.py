@@ -74,10 +74,21 @@ def register_dynamic_commands():
     commands = get_available_commands()
 
     if not commands or isinstance(commands, str) or "error" in commands:
-        # If we couldn't get commands from the daemon, register some basic ones as fallback
-        typer.echo(
-            "Could not fetch commands from daemon, using basic commands", err=True
+        # If we couldn't get commands from the daemon, register diagnostic commands
+        typer.secho(
+            "\n⚠️  WARNING: Cannot connect to the Guardian daemon! ⚠️",
+            fg="yellow",
+            err=True,
         )
+        typer.echo(
+            "Commands for normal operation are not available. Registering diagnostic commands instead.",
+            err=True,
+        )
+        typer.echo(
+            "Use 'status', 'logs', or 'socket-check' commands to diagnose the issue with the daemon.",
+            err=True,
+        )
+        typer.echo("", err=True)  # Empty line for better formatting
         register_basic_commands()
         return
 
@@ -110,8 +121,8 @@ def register_dynamic_commands():
 
             # Pass --help to the app (which will cause it to print help and exit)
             # We'll redirect the help output to be part of our command
-            from contextlib import redirect_stdout
             import io
+            from contextlib import redirect_stdout
 
             f = io.StringIO()
             with redirect_stdout(f):
@@ -168,97 +179,143 @@ def create_command(app_instance, cli_name, ipc_name, description, params):
 
 def register_basic_commands():
     """
-    Register basic commands as fallback when we can't query the daemon.
-    These commands correspond to the ones we know exist in the daemon.
+    Register diagnostic commands for when we can't connect to the daemon.
+    These commands help diagnose the issue with the daemon connection.
     """
+    import os
+    import subprocess
+    from datetime import datetime
 
-    @app.command()
-    def setup_user(username: str):
-        """Set up a new user with the guardian system."""
-        result = ipc_call("setup-user", username)
-        try:
-            # Try to pretty-print JSON responses
-            parsed = json.loads(result)
-            typer.echo(json.dumps(parsed, indent=2))
-        except (json.JSONDecodeError, ValueError):
-            # If not JSON, just print as-is
-            typer.echo(result)
+    @app.command(name="status")
+    def daemon_status():
+        """Check the status of the guardian daemon service."""
+        typer.echo("Checking Guardian daemon status...\n")
 
-    @app.command()
-    def remove_user(username: str):
-        """Remove a user from the guardian system."""
-        result = ipc_call("remove-user", username)
+        # Run systemctl command to check daemon status
         try:
-            parsed = json.loads(result)
-            typer.echo(json.dumps(parsed, indent=2))
-        except (json.JSONDecodeError, ValueError):
-            typer.echo(result)
+            # First try as normal user with sudo
+            cmd = ["sudo", "systemctl", "status", "guardian_daemon.service"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
 
-    @app.command(name="show-users")
-    def show_users():
-        """Show all users in the guardian system."""
-        result = ipc_call("list_kids")
-        try:
-            parsed = json.loads(result)
-            if "kids" in parsed:
-                typer.echo("Users in the guardian system:")
-                for user in parsed["kids"]:
-                    typer.echo(f"  - {user}")
+            if result.returncode == 0:
+                typer.echo(result.stdout)
             else:
-                typer.echo(json.dumps(parsed, indent=2))
-        except (json.JSONDecodeError, ValueError):
-            typer.echo(result)
+                typer.echo(f"Error getting daemon status: {result.stderr}")
+                typer.echo("\nTrying without sudo...")
 
-    @app.command(name="show-policy")
-    def show_policy():
-        """Show the current policy."""
-        # Try to get policy information using available commands
-        try:
-            # First get the list of users
-            users_result = ipc_call("list_kids")
-            users_data = json.loads(users_result)
-
-            if "kids" in users_data and users_data["kids"]:
-                typer.echo("Policy information:")
-                for user in users_data["kids"]:
-                    # Get curfew for this user
-                    curfew_result = ipc_call("get_curfew", user)
-                    try:
-                        curfew_data = json.loads(curfew_result)
-                        typer.echo(f"\nUser: {user}")
-                        typer.echo(f"  Curfew: {curfew_data.get('curfew', 'Not set')}")
-
-                        # Get quota if available
-                        quota_result = ipc_call("get_quota", user)
-                        try:
-                            quota_data = json.loads(quota_result)
-                            if "error" not in quota_data:
-                                typer.echo(
-                                    f"  Daily limit: {quota_data.get('limit', 'Not set')} minutes"
-                                )
-                                typer.echo(
-                                    f"  Used today: {quota_data.get('used', 0)} minutes"
-                                )
-                                typer.echo(
-                                    f"  Remaining: {quota_data.get('remaining', 0)} minutes"
-                                )
-                        except (json.JSONDecodeError, ValueError, KeyError):
-                            # Log error but don't display to keep the output clean
-                            pass
-                    except (json.JSONDecodeError, ValueError, KeyError):
-                        # Log error but don't display to keep the output clean
-                        pass
-            else:
-                typer.echo("No users found in the system.")
+                # Try without sudo as fallback
+                cmd = ["systemctl", "status", "guardian_daemon.service"]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    typer.echo(result.stdout)
+                else:
+                    typer.echo("Failed to get daemon status with or without sudo.")
+        except subprocess.TimeoutExpired:
+            typer.echo("Command timed out while checking daemon status.")
         except Exception as e:
-            typer.echo(f"Error getting policy information: {e}")
-            # Fallback to basic curfew info
-            result = ipc_call("get_curfew", "_")
+            typer.echo(f"Error checking daemon status: {str(e)}")
+
+    @app.command(name="logs")
+    def daemon_logs(lines: int = 20):
+        """Show recent logs from the guardian daemon."""
+        typer.echo(f"Showing last {lines} lines of guardian daemon logs...\n")
+
+        try:
+            # Try with sudo first
+            cmd = [
+                "sudo",
+                "journalctl",
+                "-u",
+                "guardian_daemon.service",
+                "-n",
+                str(lines),
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+
+            if result.returncode == 0:
+                typer.echo(result.stdout)
+            else:
+                typer.echo(f"Error fetching daemon logs: {result.stderr}")
+                typer.echo("\nTrying without sudo...")
+
+                # Try without sudo as fallback
+                cmd = ["journalctl", "-u", "guardian_daemon.service", "-n", str(lines)]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    typer.echo(result.stdout)
+                else:
+                    typer.echo("Failed to get daemon logs with or without sudo.")
+        except subprocess.TimeoutExpired:
+            typer.echo("Command timed out while fetching daemon logs.")
+        except Exception as e:
+            typer.echo(f"Error fetching daemon logs: {str(e)}")
+
+    @app.command(name="socket-check")
+    def check_socket():
+        """Check if the guardian daemon socket exists and has proper permissions."""
+        typer.echo(f"Checking daemon socket at {IPC_SOCKET}...\n")
+
+        if not os.path.exists(IPC_SOCKET):
+            typer.echo(f"❌ Socket file not found: {IPC_SOCKET}")
+            typer.echo("The daemon may not be running.")
+            return
+
+        try:
+            # Get socket file stats
+            stats = os.stat(IPC_SOCKET)
+            perms = oct(stats.st_mode)[-3:]  # Last 3 digits of octal permissions
+
+            typer.echo(f"✅ Socket file exists: {IPC_SOCKET}")
+            typer.echo(f"   - Owner: {stats.st_uid}")
+            typer.echo(f"   - Group: {stats.st_gid}")
+            typer.echo(f"   - Permissions: {perms}")
+            typer.echo(f"   - Last modified: {datetime.fromtimestamp(stats.st_mtime)}")
+
+            # Try to connect to socket
             try:
-                parsed = json.loads(result)
-                typer.echo(json.dumps(parsed, indent=2))
-            except (json.JSONDecodeError, ValueError) as e:
-                typer.echo(result)
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                s.settimeout(2)  # Set 2 second timeout
+                s.connect(IPC_SOCKET)
+                typer.echo("✅ Socket connection successful!")
+                s.close()
+            except ConnectionRefusedError:
+                typer.echo(
+                    "❌ Connection refused. The daemon may not be listening on this socket."
+                )
+            except socket.timeout:
+                typer.echo("❌ Connection timed out. The daemon is not responding.")
+            except Exception as e:
+                typer.echo(f"❌ Socket connection error: {str(e)}")
+        except Exception as e:
+            typer.echo(f"Error checking socket: {str(e)}")
+
+    @app.command(name="restart-daemon")
+    def restart_daemon():
+        """Attempt to restart the guardian daemon service."""
+        typer.echo("Attempting to restart the Guardian daemon...")
+
+        try:
+            # First try with sudo
+            cmd = ["sudo", "systemctl", "restart", "guardian_daemon.service"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+
+            if result.returncode == 0:
+                typer.echo("✅ Guardian daemon restarted successfully!")
+                typer.echo("\nChecking daemon status after restart...")
+
+                # Check status after restart
+                status_cmd = ["sudo", "systemctl", "status", "guardian_daemon.service"]
+                status_result = subprocess.run(
+                    status_cmd, capture_output=True, text=True, timeout=5
+                )
+                typer.echo(status_result.stdout)
+            else:
+                typer.echo(f"❌ Failed to restart daemon: {result.stderr}")
+                typer.echo("You may not have the necessary permissions.")
+        except subprocess.TimeoutExpired:
+            typer.echo("Command timed out while restarting daemon.")
+        except Exception as e:
+            typer.echo(f"Error restarting daemon: {str(e)}")
 
 
 # Register commands at module load time
