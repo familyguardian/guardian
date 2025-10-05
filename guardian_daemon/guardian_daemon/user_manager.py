@@ -46,31 +46,33 @@ class UserManager:
     def ensure_kids_group(self):
         """
         Ensure the 'kids' group exists and all managed users are members of it.
+        Also ensures all managed users are in the 'users' group to access agent files.
         """
-        group_name = "kids"
-        users = set(self.policy.data.get("users", {}).keys())
+        required_groups = ["kids", "users"]
+        managed_users = set(self.policy.data.get("users", {}).keys())
 
-        # Check if group exists, create if not
+        # Check if 'kids' group exists, create if not
         try:
-            grp.getgrnam(group_name)
-            logger.debug(f"Group '{group_name}' already exists.")
+            grp.getgrnam("kids")
+            logger.debug("Group 'kids' already exists.")
         except KeyError:
-            logger.info(f"Creating group '{group_name}'.")
+            logger.info("Creating group 'kids'.")
             try:
                 subprocess.run(
-                    ["groupadd", group_name], check=True, capture_output=True, text=True
+                    ["groupadd", "kids"], check=True, capture_output=True, text=True
                 )
             except subprocess.CalledProcessError as e:
-                logger.error(f"Failed to create group '{group_name}': {e.stderr}")
+                logger.error(f"Failed to create group 'kids': {e.stderr}")
                 return
 
-        # Add each user to the group
-        for username in users:
+        # Process each managed user
+        for username in managed_users:
             if not self.user_exists(username):
                 logger.warning(f"User '{username}' does not exist on system.")
                 continue
 
             try:
+                # Get current groups for the user
                 user_groups = [
                     g.gr_name for g in grp.getgrall() if username in g.gr_mem
                 ]
@@ -82,21 +84,25 @@ class UserManager:
                 logger.error(f"Could not determine groups for user {username}: {e}")
                 continue
 
-            if group_name not in user_groups:
-                logger.info(f"Adding user '{username}' to group '{group_name}'.")
-                try:
-                    subprocess.run(
-                        ["usermod", "-aG", group_name, username],
-                        check=True,
-                        capture_output=True,
-                        text=True,
+            # Add user to each required group if not already a member
+            for group_name in required_groups:
+                if group_name not in user_groups:
+                    logger.info(f"Adding user '{username}' to group '{group_name}'.")
+                    try:
+                        subprocess.run(
+                            ["usermod", "-aG", group_name, username],
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                    except subprocess.CalledProcessError as e:
+                        logger.error(
+                            f"Failed to add user '{username}' to group '{group_name}': {e.stderr}"
+                        )
+                else:
+                    logger.debug(
+                        f"User '{username}' is already in group '{group_name}'."
                     )
-                except subprocess.CalledProcessError as e:
-                    logger.error(
-                        f"Failed to add user '{username}' to group '{group_name}': {e.stderr}"
-                    )
-            else:
-                logger.debug(f"User '{username}' is already in group '{group_name}'.")
 
     def ensure_pam_time_module(self):
         """

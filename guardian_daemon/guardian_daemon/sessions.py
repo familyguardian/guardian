@@ -317,6 +317,10 @@ class SessionTracker:
         # Ensure user account setup - user already exists since we have a login event
         self.user_manager.write_time_rules()
 
+        # Ensure the user is in both 'kids' and 'users' groups
+        logger.info(f"Ensuring {username} is in required groups")
+        self.user_manager.ensure_kids_group()
+
         # For login events, we only need to call ensure_systemd_user_service
         # which will handle both setup and activation of the agent service
         logger.info(f"Ensuring guardian agent service is running for {username}")
