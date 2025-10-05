@@ -298,8 +298,11 @@ class SessionTracker:
             }
             self.session_locks[session_id] = []
 
-        # Ensure user account setup
+        # Ensure user account setup - user already exists since we have a login event
         self.user_manager.write_time_rules()
+
+        # Setup user service and ensure it's running
+        # We know the user exists because we have a login event
         self.user_manager.setup_user_service(username)
         self.user_manager.ensure_systemd_user_service(username)
 
