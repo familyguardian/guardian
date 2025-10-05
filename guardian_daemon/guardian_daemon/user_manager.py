@@ -443,36 +443,85 @@ class UserManager:
         """
         Sets up the guardian_agent.service for the given user's systemd.
         Updates the service file if its checksum has changed.
+        Ensures correct directory structure and permissions.
         """
         try:
             user_info = pwd.getpwnam(username)
             user_home = Path(user_info.pw_dir)
-            user_systemd_path = user_home / ".config/systemd/user"
+            config_path = user_home / ".config"
+            user_systemd_path = config_path / "systemd/user"
             service_file_path = user_systemd_path / "guardian_agent.service"
 
-            user_systemd_path.mkdir(parents=True, exist_ok=True)
-            # Ownership will be set recursively below
-
+            # Check if source service file exists
             if not SOURCE_SERVICE_FILE.exists():
                 logger.error(
                     f"Source service file {SOURCE_SERVICE_FILE} does not exist."
                 )
                 return
 
-            shutil.copy(SOURCE_SERVICE_FILE, service_file_path)
-            # Ownership will be set recursively below
+            # Check if user's home directory exists and is accessible
+            if not user_home.exists():
+                logger.error(
+                    f"Home directory for user '{username}' does not exist: {user_home}"
+                )
+                return
 
-            # Reload, enable, and start the service for the user
-            self._run_systemctl_user_command(username, "daemon-reload")
-            self._run_systemctl_user_command(
-                username, "enable", "guardian_agent.service"
-            )
-            self._run_systemctl_user_command(
-                username, "start", "guardian_agent.service"
-            )
+            # Create directory structure with proper permissions at each step
+            try:
+                # First create .config if needed and set permissions
+                if not config_path.exists():
+                    logger.debug(f"Creating .config directory for {username}")
+                    config_path.mkdir(mode=0o755, exist_ok=True)
+                    os.chown(config_path, user_info.pw_uid, user_info.pw_gid)
 
-            # Recursively set ownership for all files and directories in ~/.config
-            chown_recursive(user_home / ".config", user_info.pw_uid, user_info.pw_gid)
+                # Then create .config/systemd/user with proper permissions
+                user_systemd_path.mkdir(parents=True, exist_ok=True)
+                os.chown(user_systemd_path, user_info.pw_uid, user_info.pw_gid)
+
+                # Copy the service file and set permissions
+                shutil.copy(SOURCE_SERVICE_FILE, service_file_path)
+                os.chown(service_file_path, user_info.pw_uid, user_info.pw_gid)
+                os.chmod(service_file_path, 0o644)  # rw-r--r--
+
+                logger.info(
+                    f"Successfully created guardian agent service file for {username}"
+                )
+            except PermissionError as e:
+                logger.error(
+                    f"Permission error setting up directories for {username}: {e}"
+                )
+                return
+
+            # Reload, enable, and start the service for the user if they're logged in
+            # First check if user has active sessions
+            try:
+                result = subprocess.run(
+                    ["loginctl", "show-user", username, "--property=State"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+
+                is_active = "State=active" in result.stdout
+
+                if is_active:
+                    logger.info(
+                        f"User {username} is active, setting up systemd service"
+                    )
+                    self._run_systemctl_user_command(username, "daemon-reload")
+                    self._run_systemctl_user_command(
+                        username, "enable", "guardian_agent.service"
+                    )
+                    self._run_systemctl_user_command(
+                        username, "start", "guardian_agent.service"
+                    )
+                else:
+                    logger.info(
+                        f"User {username} is not logged in, service will be enabled at next login"
+                    )
+                    # For non-logged-in users, we leave the service file in place but don't try to enable/start
+            except Exception as e:
+                logger.warning(f"Could not determine login status for {username}: {e}")
 
         except KeyError:
             logger.error(f"User '{username}' not found, cannot setup service.")
@@ -482,28 +531,76 @@ class UserManager:
     def ensure_systemd_user_service(self, username):
         """
         Ensure that systemd user services are set up for the given user without enabling lingering.
+        Only starts the service if the user is actively logged in with a session.
         """
         try:
+            # First check if user exists in the system
             user_info = pwd.getpwnam(username)
             user_home = Path(user_info.pw_dir)
-            service_file = user_home / ".config/systemd/user/guardian_agent.service"
 
-            if not service_file.exists():
-                self.setup_user_service(username)
-
-            # Check if the guardian_agent service is active, if not, start it
-            result = self._run_systemctl_user_command(
-                username, "is-active", "guardian_agent.service"
-            )
-            if result and result.stdout.strip() != "active":
-                logger.debug(f"Starting guardian_agent service for user {username}.")
-                self._run_systemctl_user_command(
-                    username, "start", "guardian_agent.service"
+            # Check if user is actively logged in (has active sessions)
+            is_logged_in = False
+            try:
+                # Use loginctl to check if user has active sessions
+                result = subprocess.run(
+                    ["loginctl", "show-user", username, "--property=State"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
                 )
+                if "State=active" in result.stdout:
+                    is_logged_in = True
+                    logger.debug(f"User {username} is logged in with active session")
+            except Exception as e:
+                logger.warning(f"Could not determine login status for {username}: {e}")
+
+            # Only proceed with service setup/start if user is logged in
+            if is_logged_in:
+                service_dir = user_home / ".config/systemd/user"
+                service_file = service_dir / "guardian_agent.service"
+
+                # Make sure the directory exists with correct permissions
+                if not service_dir.exists():
+                    logger.debug(f"Creating systemd user directory for {username}")
+                    service_dir.mkdir(parents=True, exist_ok=True)
+                    # Set correct ownership
+                    chown_recursive(service_dir, user_info.pw_uid, user_info.pw_gid)
+
+                # Set up the service if it doesn't exist
+                if not service_file.exists():
+                    logger.info(
+                        f"Setting up guardian agent service for logged-in user {username}"
+                    )
+                    self.setup_user_service(username)
+
+                # Now check if the service is active and start if needed
+                result = self._run_systemctl_user_command(
+                    username, "is-active", "guardian_agent.service"
+                )
+                if result and result.stdout.strip() != "active":
+                    logger.debug(f"Starting guardian_agent service for user {username}")
+                    self._run_systemctl_user_command(
+                        username, "start", "guardian_agent.service"
+                    )
+                else:
+                    logger.debug(
+                        f"guardian_agent service for user {username} is already active"
+                    )
             else:
-                logger.debug(
-                    f"guardian_agent service for user {username} is already active."
+                logger.info(
+                    f"User {username} is not logged in, skipping agent service start"
                 )
+                # Just ensure the service file exists for next login
+                service_dir = user_home / ".config/systemd/user"
+                if service_dir.exists():
+                    service_file = service_dir / "guardian_agent.service"
+                    if not service_file.exists() and SOURCE_SERVICE_FILE.exists():
+                        logger.debug(
+                            f"Preparing service file for future login of {username}"
+                        )
+                        service_dir.mkdir(parents=True, exist_ok=True)
+                        shutil.copy(SOURCE_SERVICE_FILE, service_file)
+                        chown_recursive(service_dir, user_info.pw_uid, user_info.pw_gid)
 
         except KeyError:
             logger.error(f"User '{username}' not found, cannot ensure systemd service.")
@@ -511,24 +608,64 @@ class UserManager:
             logger.error(f"Failed to ensure systemd user service for {username}: {e}")
 
     def _run_systemctl_user_command(self, username, *args):
-        """Helper to run systemctl --user commands for a given user."""
+        """Helper to run systemctl --user commands for a given user.
+
+        Uses runuser to execute commands as the target user with proper environment.
+        Handles common error cases and logs appropriate messages.
+        """
         try:
+            # Get user info for XDG_RUNTIME_DIR environment variable
+            user_info = pwd.getpwnam(username)
+            uid = user_info.pw_uid
+
+            # Set up the environment variables needed for systemd user commands
+            # This ensures systemd can find the user's socket even if they don't have an active session
+            env_setup = f"export XDG_RUNTIME_DIR=/run/user/{uid}; export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus;"
+
+            # Build the complete command with environment setup
             command = [
                 "runuser",
-                "-l",
+                "-l",  # Login shell to get user's environment
                 username,
                 "-c",
-                f"systemctl --user {' '.join(args)}",
+                f"{env_setup} systemctl --user {' '.join(args)}",
             ]
-            result = subprocess.run(command, check=True, capture_output=True, text=True)
+
+            # Run the command with a reasonable timeout
+            result = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,  # Add timeout to avoid hanging
+            )
             return result
+
         except subprocess.CalledProcessError as e:
+            # Handle specific error cases
+            stderr = e.stderr.strip() if hasattr(e, "stderr") else ""
+            if "Failed to connect to bus" in stderr:
+                logger.warning(f"User {username} doesn't have an active session bus")
+            elif "Unit guardian_agent.service not found" in stderr:
+                logger.warning(f"Service file not properly loaded for user {username}")
+            else:
+                logger.error(
+                    f"Error running systemctl command for {username} ('{' '.join(args)}'): {stderr}"
+                )
+            return None
+
+        except subprocess.TimeoutExpired:
             logger.error(
-                f"Error running systemctl command for {username} ('{' '.join(args)}'): {e.stderr}"
+                f"Command timed out for user {username}: 'systemctl --user {' '.join(args)}'"
             )
             return None
+
         except FileNotFoundError:
             logger.error(
                 "`runuser` command not found. Is the systemd package installed?"
             )
+            return None
+
+        except Exception as e:
+            logger.error(f"Unexpected error running command for {username}: {e}")
             return None
