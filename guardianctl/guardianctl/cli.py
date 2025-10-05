@@ -105,11 +105,14 @@ def register_dynamic_commands():
 
         @app.command()
         def help():
-            """Show available commands and their descriptions."""
-            typer.echo("Available commands:")
-            for cmd in app.registered_commands:
-                cmd_help = cmd.callback.__doc__ or "No description available"
-                typer.echo(f"  {cmd.name}: {cmd_help}")
+            """Show help for all commands."""
+            # Use typer's built-in help display - same as running with --help flag
+            from click.testing import CliRunner
+
+            # Use click's CliRunner to simulate running with --help
+            runner = CliRunner()
+            result = runner.invoke(app, ["--help"], color=True)
+            typer.echo(result.output)
 
 
 def create_command(app_instance, cli_name, ipc_name, description, params):
