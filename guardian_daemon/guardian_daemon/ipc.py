@@ -34,6 +34,10 @@ class GuardianIPCServer:
         self.config = config
         self.tracker = tracker
         self.policy = policy
+        # Access the user manager from the session tracker
+        self.user_manager = (
+            self.tracker.user_manager if hasattr(self.tracker, "user_manager") else None
+        )
         self.socket_path = self.config.get("ipc_socket", "/run/guardian-daemon.sock")
         self.admin_group = self.config.get("ipc_admin_group")
         if self.admin_group:
@@ -56,6 +60,7 @@ class GuardianIPCServer:
             "reload_timers": self.handle_reload_timers,
             "reset_quota": self.handle_reset_quota,
             "describe_commands": self.handle_describe_commands,
+            "setup-user": self.handle_setup_user,
         }
 
     async def start(self):
@@ -248,6 +253,49 @@ class GuardianIPCServer:
         await self.tracker.perform_daily_reset()
         logger.info("Quota reset for all users via IPC")
         return json.dumps({"status": "quota reset"})
+
+    def handle_setup_user(self, username):
+        """
+        Sets up a user with Guardian (adds to groups, creates systemd services, etc).
+
+        Args:
+            username (str): Username of the user to set up
+        """
+        if not username:
+            logger.warning("setup-user called without username argument")
+            return json.dumps({"error": "missing username"})
+
+        if not self.user_manager:
+            logger.error("User manager not available, cannot set up user")
+            return json.dumps({"error": "user manager not available"})
+
+        try:
+            # First check if user exists
+            if not self.user_manager.user_exists(username):
+                logger.warning(f"setup-user: user '{username}' does not exist")
+                return json.dumps({"error": f"user '{username}' does not exist"})
+
+            # Add user to policy if not already present
+            if username not in self.policy.data.get("users", {}):
+                logger.info(f"Adding user '{username}' to policy")
+                self.policy.add_user(username)
+
+            # Set up user login (groups, services, etc)
+            result = self.user_manager.setup_user_login(username)
+            if result:
+                logger.info(f"User '{username}' successfully set up")
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "message": f"User '{username}' set up successfully",
+                    }
+                )
+            else:
+                logger.error(f"Failed to set up user '{username}'")
+                return json.dumps({"error": f"failed to set up user '{username}'"})
+        except Exception as e:
+            logger.error(f"Error setting up user '{username}': {e}")
+            return json.dumps({"error": str(e)})
 
     def handle_describe_commands(self, _):
         """

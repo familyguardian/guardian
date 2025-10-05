@@ -82,6 +82,37 @@ class Policy:
         logger.debug(f"Configured timezone: {tz}")
         return tz
 
+    def add_user(self, username: str) -> bool:
+        """
+        Adds a user to the policy with default settings.
+
+        Args:
+            username (str): Username to add
+
+        Returns:
+            bool: True if the user was added, False otherwise
+        """
+        if not username:
+            logger.error("Cannot add user with empty username")
+            return False
+
+        if username in self.data.get("users", {}):
+            logger.debug(f"User '{username}' already exists in policy")
+            return True
+
+        # Ensure users dict exists
+        if "users" not in self.data:
+            self.data["users"] = {}
+
+        # Add user with empty config (will use defaults)
+        self.data["users"][username] = {}
+        logger.info(f"Added user '{username}' to policy with default settings")
+
+        # Update database
+        self.storage.sync_config_to_db(self.data)
+        logger.info(f"User '{username}' synchronized to database")
+        return True
+
     def reload(self):
         """
         Reload the policy configuration and synchronize with the database.
