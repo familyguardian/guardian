@@ -301,13 +301,19 @@ class UserManager:
                 <allow own="org.guardian.Daemon"/>
                 <allow send_destination_prefix="org.guardian.Agent"/>
                 <allow receive_sender_prefix="org.guardian.Agent"/>
+                <!-- Explicitly allow sending to individual agent instances with PIDs -->
+                <allow send_type="method_call" send_path="/org/guardian/Agent"/>
+                <allow send_interface="org.guardian.Agent"/>
             </policy>
 
             <!-- Policy for kids group users -->
             <policy group="kids">
                 <allow own_prefix="org.guardian.Agent"/>
                 <allow send_destination="org.guardian.Daemon"/>
+                <allow send_path="/org/guardian/Daemon"/>
+                <allow send_interface="org.guardian.Daemon"/>
                 <allow receive_user="root"/>
+                <allow receive_sender="org.guardian.Daemon"/>
             </policy>
 
             <!-- Default policy for everyone else -->

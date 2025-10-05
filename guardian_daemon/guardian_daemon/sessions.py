@@ -32,23 +32,31 @@ class SessionTracker:
     async def refresh_agent_name_mapping(self):
         """
         Refresh the mapping of usernames to their current D-Bus agent names using discover_agent_names_for_user().
-        Stores the mapping in self.agent_name_map: {username: [dbus_name, ...]}
+        Stores the mapping in self.agent_name_map: {username: {dbus_name, ...}}
         """
         self.agent_name_map = {}
         kids = set(self.policy.data.get("users", {}).keys())
         for username in kids:
             try:
-                names = await self.discover_agent_names_for_user(username)
-                self.agent_name_map[username] = names
-                logger.debug(f"Refreshed agent D-Bus names for {username}: {names}")
+                await self.discover_agent_names_for_user(username)
+                # Get the names after discovery
+                agent_names = self.agent_name_map.get(username, [])
+                logger.debug(
+                    f"Refreshed agent D-Bus names for {username}: {agent_names}"
+                )
             except Exception as e:
                 logger.error(f"Error refreshing agent names for {username}: {e}")
 
     def get_agent_names_for_user(self, username: str) -> list:
         """
         Return the cached list of D-Bus agent names for a user, or empty list if not found.
+        Converts from set to list if necessary.
         """
-        return self.agent_name_map.get(username, [])
+        agent_names = self.agent_name_map.get(username, [])
+        # Convert to list if it's a set
+        if isinstance(agent_names, set):
+            return list(agent_names)
+        return agent_names
 
     async def discover_agent_names_for_user(self, username: str):
         """
@@ -255,7 +263,7 @@ class SessionTracker:
         self.active_sessions: dict[str, dict] = {}
         self.session_locks: dict[str, list[tuple[float, float | None]]] = {}
         self.session_lock = asyncio.Lock()
-        self.agent_name_map: dict[str, list[str]] = {}
+        self.agent_name_map: dict[str, set[str]] = {}
 
         # Restore active sessions from database (sessions with no end_time)
         self._restore_active_sessions()
