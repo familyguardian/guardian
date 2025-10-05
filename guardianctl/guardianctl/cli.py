@@ -272,10 +272,13 @@ def format_command_output(command, data, param=None):
             percent = int(used_percent)
             progress = f"Usage: {bar} {percent}%"
 
+            # Create a string output for the panel content
+            content = f"{table}\n\n{progress}"
+
             # Combine table and progress bar in a panel
             console.print(
                 Panel(
-                    "\n".join([str(table), "\n" + progress]),
+                    content,
                     title=f"⏱️  Screen Time for User: {data['kid']}",
                     border_style="blue",
                 )
