@@ -50,15 +50,11 @@ class SessionTracker:
         """
         return self.agent_name_map.get(username, [])
 
-    async def discover_agent_names_for_user(self, username: str) -> list:
+    async def discover_agent_names_for_user(self, username: str):
         """
-        Discover current org.guardian.Agent D-Bus names for the given user by listing names on the system bus.
-        This is used for initial population, but the NameOwnerChanged signal is the primary source of truth.
+        Scans the D-Bus for all available agent service names for a given user
+        and updates the internal map.
         """
-        from dbus_next import DBusError
-        from dbus_next.aio import MessageBus
-        from dbus_next.constants import BusType
-
         try:
             bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
             introspection = await bus.introspect(
@@ -67,65 +63,48 @@ class SessionTracker:
             obj = bus.get_proxy_object(
                 "org.freedesktop.DBus", "/org/freedesktop/DBus", introspection
             )
-            iface = obj.get_interface("org.freedesktop.DBus")
-            names = await iface.call_list_names()
+            dbus_iface = obj.get_interface("org.freedesktop.DBus")
 
-            agent_names = [
-                name
-                for name in names
-                if name.startswith("org.guardian.Agent") and f".{username}." in name
-            ]
+            all_names = await dbus_iface.call_list_names()
+            prefix = f"org.guardian.Agent.{username}."
 
-            if agent_names:
-                logger.debug(
-                    f"Discovered {len(agent_names)} agent(s) for user {username}: {agent_names}"
+            user_agents = {name for name in all_names if name.startswith(prefix)}
+
+            # Update the map, ensuring we only add active names
+            self.agent_name_map[username] = user_agents
+
+            if user_agents:
+                logger.info(
+                    f"Initial scan found active agents for {username}: {user_agents}"
                 )
-                self.agent_name_map[username] = agent_names
+            else:
+                logger.info(f"Initial scan found no active agents for {username}")
 
-            return agent_names
-        except DBusError as e:
-            logger.error(f"D-Bus error discovering agents for {username}: {e}")
-            return []
         except Exception as e:
-            logger.error(f"Unexpected error discovering agents for {username}: {e}")
-            return []
+            logger.error(f"Failed to discover agent names for {username}: {e}")
 
-    async def _handle_name_owner_changed(self, name, old_owner, new_owner):
-        """
-        Signal handler for D-Bus NameOwnerChanged.
-        Tracks agent appearance and disappearance.
-        """
-        if not name.startswith("org.guardian.Agent."):
-            return
-
+    def _handle_name_owner_changed(self, name: str, old_owner: str, new_owner: str):
+        """Signal handler for D-Bus name ownership changes."""
         try:
-            # Extract username from a name like "org.guardian.Agent.alice.pid1234"
-            parts = name.split(".")
-            if len(parts) < 4:
-                return
-            username = parts[2]
-        except IndexError:
-            logger.warning(f"Could not parse username from D-Bus name: {name}")
-            return
-
-        async with self.session_lock:
-            if new_owner and not old_owner:
-                # Agent appeared
-                if username not in self.agent_name_map:
-                    self.agent_name_map[username] = []
-                if name not in self.agent_name_map[username]:
-                    self.agent_name_map[username].append(name)
-                    logger.info(f"Agent for {username} appeared: {name}")
-            elif old_owner and not new_owner:
-                # Agent disappeared
-                if (
-                    username in self.agent_name_map
-                    and name in self.agent_name_map[username]
-                ):
-                    self.agent_name_map[username].remove(name)
-                    if not self.agent_name_map[username]:
-                        del self.agent_name_map[username]
-                    logger.info(f"Agent for {username} disappeared: {name}")
+            if name.startswith("org.guardian.Agent."):
+                parts = name.split(".")
+                if len(parts) >= 5:
+                    username = parts[3]
+                    if new_owner and not old_owner:
+                        logger.info(f"Agent for {username} appeared: {name}")
+                        if username not in self.agent_name_map:
+                            self.agent_name_map[username] = set()
+                        self.agent_name_map[username].add(name)
+                    elif old_owner and not new_owner:
+                        logger.info(f"Agent for {username} disappeared: {name}")
+                        if username in self.agent_name_map:
+                            self.agent_name_map[username].discard(name)
+                            if not self.agent_name_map[username]:
+                                del self.agent_name_map[username]
+                else:
+                    logger.warning(f"Received malformed agent bus name: {name}")
+        except Exception as e:
+            logger.error(f"Error handling name owner change for {name}: {e}")
 
     def get_agent_paths_for_user(self, username: str):
         """
@@ -486,6 +465,7 @@ class SessionTracker:
         logger.info("Registered for D-Bus NameOwnerChanged signals.")
 
         # Initial scan for already running agents
+        self.agent_name_map.clear()
         kids = set(self.policy.data.get("users", {}).keys())
         for username in kids:
             await self.discover_agent_names_for_user(username)
@@ -578,74 +558,6 @@ class SessionTracker:
 
                 uid = await session_iface.get_uid()
                 username = await self._get_username(uid)
-                await self.handle_login(session_id, uid, username, props)
-
-            asyncio.create_task(inner())
-
-        def session_removed_handler(session_id, object_path):
-            asyncio.create_task(self.handle_logout(session_id))
-
-        manager.on_session_new(session_new_handler)
-        manager.on_session_removed(session_removed_handler)
-
-        # Start periodic session update task
-        asyncio.create_task(self.periodic_session_update(interval=60))
-
-        logger.info("SessionTracker running. Waiting for logins/logouts...")
-        while True:
-            await asyncio.sleep(3600)
-
-        def session_new_handler(session_id, object_path):
-            async def inner():
-                session_obj = bus.get_proxy_object(
-                    "org.freedesktop.login1",
-                    object_path,
-                    await bus.introspect("org.freedesktop.login1", object_path),
-                )
-                session_iface = session_obj.get_interface(
-                    "org.freedesktop.login1.Session"
-                )
-                props = {}
-                introspection = await bus.introspect(
-                    "org.freedesktop.login1", object_path
-                )
-                session_interface = next(
-                    (
-                        iface
-                        for iface in introspection.interfaces
-                        if iface.name == "org.freedesktop.login1.Session"
-                    ),
-                    None,
-                )
-                if session_interface:
-                    property_names = [p.name for p in session_interface.properties]
-                    for prop in property_names:
-                        getter = getattr(session_iface, f"get_{prop.lower()}", None)
-                        if getter:
-                            try:
-                                props[prop] = await getter()
-                            except Exception as e:
-                                props[prop] = f"[ERROR: {e}]"
-                        else:
-                            props[prop] = "[NO GETTER]"
-                else:
-                    props = {"error": "Session interface not found in introspection"}
-                username = props.get("Name", None)
-                user_struct = props.get("User", None)
-                uid = (
-                    user_struct[0]
-                    if isinstance(user_struct, (list, tuple))
-                    else user_struct
-                )
-                kids = set(self.policy.data.get("users", {}).keys())
-                if username not in kids:
-                    logger.debug(
-                        f"Ignoring session from {username} (UID {uid}) Session {session_id}"
-                    )
-                    return
-                logger.debug(
-                    f"Extracted: Name={username}, UID={uid}, Desktop={props.get('Desktop')}, Service={props.get('Service')}"
-                )
                 await self.handle_login(session_id, uid, username, props)
 
             asyncio.create_task(inner())
@@ -889,4 +801,3 @@ if __name__ == "__main__":
     user_manager = UserManager(policy)
     tracker = SessionTracker(policy, config, user_manager)
     asyncio.run(tracker.run())
-# logind watcher
