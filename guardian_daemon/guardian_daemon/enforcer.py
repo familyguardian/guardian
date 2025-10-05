@@ -4,6 +4,7 @@ Checks quota and curfew, enforces limits by terminating sessions and blocking lo
 """
 
 import asyncio
+import time
 
 from dbus_next import DBusError
 from dbus_next.aio import MessageBus
@@ -179,7 +180,29 @@ class Enforcer:
     async def notify_user(self, username, message, category="info"):
         """
         Sends a desktop notification to all matching agents of the given user (via D-Bus).
+        Implements a debounce mechanism to avoid sending too many similar notifications.
         """
+        # Implement debounce mechanism to prevent excessive similar notifications
+        if not hasattr(self, "_last_notifications"):
+            self._last_notifications = {}
+
+        # Create a key using username + message to track similar notifications
+        notification_key = f"{username}:{message}"
+        current_time = time.time()
+
+        # If we've sent this notification recently, skip it
+        if notification_key in self._last_notifications:
+            last_time = self._last_notifications[notification_key]
+            # Don't send the same notification more than once every 45 seconds
+            if current_time - last_time < 45:
+                logger.debug(
+                    f"Skipping duplicate notification to {username}: '{message}' (debounced)"
+                )
+                return
+
+        # Update the last notification time
+        self._last_notifications[notification_key] = current_time
+
         notified = False
         try:
             # Get agent names from the session tracker's cache

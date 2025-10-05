@@ -153,9 +153,15 @@ class SessionTracker:
             # First, calculate time for currently active sessions for the user
             active_duration_seconds = 0
             now = time.time()
-            for session in self.active_sessions.values():
+            active_sessions_count = 0
+            for session_id, session in self.active_sessions.items():
                 if session["username"] == username:
-                    active_duration_seconds += now - session["start_time"]
+                    session_duration = now - session["start_time"]
+                    active_duration_seconds += session_duration
+                    active_sessions_count += 1
+                    logger.debug(
+                        f"Active session {session_id} for {username}: start_time={session['start_time']}, duration={session_duration/60:.1f} minutes"
+                    )
 
             # Then, add the duration of already completed sessions from the database
             reset_time = self.policy.data.get("reset_time", "03:00")
@@ -178,8 +184,19 @@ class SessionTracker:
             ]
             db_duration_seconds = sum(s[6] for s in filtered_sessions)
 
+            logger.debug(
+                f"User {username}: found {len(filtered_sessions)} completed sessions totaling {db_duration_seconds/60:.1f} minutes"
+            )
+            logger.debug(
+                f"User {username}: active sessions duration: {active_duration_seconds/60:.1f} minutes from {active_sessions_count} sessions"
+            )
+
             total_seconds = active_duration_seconds + db_duration_seconds
-            return total_seconds / 60
+            total_minutes = total_seconds / 60
+            logger.debug(
+                f"User {username}: total used time: {total_minutes:.1f} minutes"
+            )
+            return total_minutes
 
     async def get_total_time(self, username: str) -> float:
         """
@@ -199,10 +216,14 @@ class SessionTracker:
         """
         total_allowed = await self.get_total_time(username)
         if total_allowed == float("inf"):
+            logger.debug(f"User {username} has unlimited time")
             return float("inf")
 
         used_minutes = await self._calculate_used_time(username)
         remaining = total_allowed - used_minutes
+        logger.debug(
+            f"User {username} quota: total={total_allowed}, used={used_minutes:.1f}, remaining={remaining:.1f} minutes"
+        )
         return max(0, remaining)
 
     async def receive_lock_event(
@@ -244,6 +265,9 @@ class SessionTracker:
             async with self.session_lock:
                 for session_id, session in self.active_sessions.items():
                     duration = now - session["start_time"]
+                    logger.debug(
+                        f"Updating session {session_id} for {session.get('username')}: start_time={session['start_time']}, current_duration={duration/60:.1f} minutes"
+                    )
                     self.storage.update_session_progress(session_id, duration)
             await asyncio.sleep(interval)
 
@@ -291,6 +315,9 @@ class SessionTracker:
                 "desktop": desktop,
                 "service": service,
             }
+            logger.info(
+                f"Restored session {session_id} for {username}. Original start: {old_start_time}, new effective start: {now}"
+            )
             self.session_locks[session_id] = []
             logger.info(
                 f"Restored session {session_id} for {username}. Original start: {old_start_time}, new effective start: {now}"
