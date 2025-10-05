@@ -32,6 +32,17 @@ def chown_recursive(path, uid, gid):
 
 
 class UserManager:
+    def user_exists(self, username):
+        """
+        Check if a user exists on the system.
+        Returns True if user exists, False otherwise.
+        """
+        try:
+            pwd.getpwnam(username)
+            return True
+        except KeyError:
+            return False
+
     def ensure_kids_group(self):
         """
         Ensure the 'kids' group exists and all managed users are members of it.
@@ -55,9 +66,7 @@ class UserManager:
 
         # Add each user to the group
         for username in users:
-            try:
-                pwd.getpwnam(username)
-            except KeyError:
+            if not self.user_exists(username):
                 logger.warning(f"User '{username}' does not exist on system.")
                 continue
 

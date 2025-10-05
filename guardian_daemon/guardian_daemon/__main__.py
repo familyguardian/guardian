@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import hashlib
-import pwd
 import time
 
 import yaml
@@ -118,15 +117,9 @@ class GuardianDaemon:
 
         # Only set up services for users that actually exist on the system
         for username in self.policy.data.get("users", {}):
-            try:
-                # Check if user exists before attempting to set up service
-                pwd.getpwnam(username)
+            if self.usermanager.user_exists(username):
                 self.usermanager.setup_user_service(username)
-            except KeyError:
-                # User doesn't exist, skip service setup
-                logger.warning(
-                    f"User '{username}' not found in system, skipping service setup"
-                )
+            # We don't log here as ensure_kids_group already logs non-existent users
 
         reset_time = self.policy.data.get("reset_time", "03:00")
         self.systemd.create_daily_reset_timer(reset_time)
