@@ -114,6 +114,10 @@ class GuardianDaemon:
         self.usermanager.write_time_rules()
         self.usermanager.ensure_kids_group()
         self.usermanager.setup_dbus_policy()
+
+        for username in self.policy.data.get("users", {}):
+            self.usermanager.setup_user_service(username)
+
         reset_time = self.policy.data.get("reset_time", "03:00")
         self.systemd.create_daily_reset_timer(reset_time)
         # Curfew timer setup (example: use start/end from policy)
