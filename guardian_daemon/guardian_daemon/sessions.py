@@ -475,9 +475,13 @@ class SessionTracker:
         manager = obj.get_interface("org.freedesktop.login1.Manager")
 
         # Set up D-Bus signal handler for agent appearance/disappearance
-        dbus_iface = bus.get_proxy_object(
-            "org.freedesktop.DBus", "/org/freedesktop/DBus", introspection
-        ).get_interface("org.freedesktop.DBus")
+        dbus_introspection = await bus.introspect(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus"
+        )
+        dbus_obj = bus.get_proxy_object(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", dbus_introspection
+        )
+        dbus_iface = dbus_obj.get_interface("org.freedesktop.DBus")
         dbus_iface.on_name_owner_changed(self._handle_name_owner_changed)
         logger.info("Registered for D-Bus NameOwnerChanged signals.")
 
