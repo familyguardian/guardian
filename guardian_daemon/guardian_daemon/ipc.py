@@ -517,6 +517,19 @@ class GuardianIPCServer:
             user_settings[setting_key] = setting_value
             self.policy.storage.set_user_settings(username, user_settings)
 
+            # Reload policy to apply changes immediately (especially for curfew/time.conf)
+            if setting_key == "curfew":
+                logger.info(f"Reloading policy to apply curfew changes for {username}")
+                self.policy.reload()
+                # Explicitly update time rules if we have access to user_manager
+                if self.user_manager:
+                    logger.info(
+                        f"Updating time.conf with new curfew settings for {username}"
+                    )
+                    # Clean up any existing duplicates before writing new rules
+                    self.user_manager._cleanup_time_conf()
+                    self.user_manager.write_time_rules()
+
             logger.info(f"Updated {setting_key} for user {username}")
             return json.dumps(
                 {
