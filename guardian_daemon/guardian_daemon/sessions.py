@@ -154,14 +154,34 @@ class SessionTracker:
             active_duration_seconds = 0
             now = time.time()
             active_sessions_count = 0
+
+            # Find the main desktop session if it exists
+            main_desktop_session = None
             for session_id, session in self.active_sessions.items():
                 if session["username"] == username:
-                    session_duration = now - session["start_time"]
-                    active_duration_seconds += session_duration
-                    active_sessions_count += 1
-                    logger.debug(
-                        f"Active session {session_id} for {username}: start_time={session['start_time']}, duration={session_duration/60:.1f} minutes"
-                    )
+                    # Only count desktop sessions, not service sessions or SSH sessions
+                    # Desktop sessions have desktop set and service not set to systemd-user
+                    if session["desktop"] and session["service"] != "systemd-user":
+                        main_desktop_session = session
+                        break
+
+            # If we have a main desktop session, only count that one
+            if main_desktop_session:
+                session_duration = now - main_desktop_session["start_time"]
+                active_duration_seconds = session_duration
+                active_sessions_count = 1
+                logger.debug(
+                    f"Active desktop session for {username}: start_time={main_desktop_session['start_time']}, duration={session_duration/60:.1f} minutes"
+                )
+            # If no desktop session, check all sessions but only for logging
+            else:
+                for session_id, session in self.active_sessions.items():
+                    if session["username"] == username:
+                        session_duration = now - session["start_time"]
+                        active_sessions_count += 1
+                        logger.debug(
+                            f"Active session {session_id} for {username}: start_time={session['start_time']}, duration={session_duration/60:.1f} minutes"
+                        )
 
             # Then, add the duration of already completed sessions from the database
             reset_time = self.policy.data.get("reset_time", "03:00")
@@ -178,15 +198,19 @@ class SessionTracker:
             db_sessions = self.storage.get_sessions_for_user(
                 username, since=last_reset.timestamp()
             )
-            # Filter: Only sessions with meaningful duration and not systemd-user sessions
-            # IMPORTANT: Also filter out sessions that are currently active to avoid double-counting
+            # Filter sessions to only include:
+            # 1. Meaningful duration (> 30 seconds)
+            # 2. Not systemd-user sessions
+            # 3. Only desktop sessions with a desktop value set
+            # 4. Not currently active sessions (to avoid double-counting)
             active_session_ids = set(self.active_sessions.keys())
             filtered_sessions = [
                 s
                 for s in db_sessions
-                if s[6] > 30
-                and s[8] != "systemd-user"
-                and s[0] not in active_session_ids
+                if s[6] > 30  # Has meaningful duration
+                and s[8] != "systemd-user"  # Not a systemd-user session
+                and s[7]  # Has a desktop value
+                and s[0] not in active_session_ids  # Not currently active
             ]
             db_duration_seconds = sum(s[6] for s in filtered_sessions)
 
