@@ -81,6 +81,8 @@ class GuardianDaemon:
             # Create a copy of active users to avoid issues with concurrent modification
             active_users = list(await self.tracker.get_active_users())
             for username in active_users:
+                # Only enforce once per user - the enforcer method shouldn't be called twice
+                # The enforce_user method will handle the notifications
                 await self.enforcer.enforce_user(username)
 
     async def check_and_recover_reset(self):

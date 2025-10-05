@@ -295,28 +295,47 @@ class SessionTracker:
     def _restore_active_sessions(self):
         """
         Restore sessions that are still open (no end_time) from the database into active_sessions.
-        The start_time is reset to now to avoid counting offline time.
+        Instead of resetting start_time, we now properly account for time already used.
         """
         c = self.storage.conn.cursor()
         c.execute(
-            "SELECT session_id, username, uid, start_time, desktop, service FROM sessions WHERE end_time IS NULL OR end_time = 0"
+            "SELECT session_id, username, uid, start_time, duration, desktop, service FROM sessions WHERE end_time IS NULL OR end_time = 0"
         )
         rows = c.fetchall()
         now = time.time()
         for row in rows:
-            session_id, username, uid, old_start_time, desktop, service = row
-            # The session was active before a restart. Reset start_time to now
-            # to ensure we only count time from when the daemon is actually running.
-            # The time before the restart is already persisted by periodic_session_update.
+            # Safely handle both old and new DB schema versions by checking column count
+            if len(row) >= 7:
+                (
+                    session_id,
+                    username,
+                    uid,
+                    old_start_time,
+                    duration,
+                    desktop,
+                    service,
+                ) = row
+            else:
+                # Handle old schema that doesn't have desktop and service columns
+                session_id, username, uid, old_start_time, duration = row
+                desktop = ""
+                service = ""
+
+            # Instead of resetting start_time to now, we adjust it based on already recorded duration
+            # This ensures we properly account for time already spent in this session
+            # By subtracting the duration from now, we keep the accumulated time intact
+            adjusted_start_time = now - (duration if duration else 0)
+
             self.active_sessions[session_id] = {
                 "uid": uid,
                 "username": username,
-                "start_time": now,
+                "start_time": adjusted_start_time,
+                "original_start_time": old_start_time,
                 "desktop": desktop,
                 "service": service,
             }
             logger.info(
-                f"Restored session {session_id} for {username}. Original start: {old_start_time}, new effective start: {now}"
+                f"Restored session {session_id} for {username}. Original start: {old_start_time}, duration so far: {duration/60:.1f} min, adjusted start: {adjusted_start_time}"
             )
             self.session_locks[session_id] = []
             logger.info(

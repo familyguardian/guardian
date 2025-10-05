@@ -5,6 +5,8 @@ Checks quota and curfew, enforces limits by terminating sessions and blocking lo
 
 import asyncio
 import time
+from collections import defaultdict
+from typing import Dict, Tuple
 
 from dbus_next import DBusError
 from dbus_next.aio import MessageBus
@@ -28,6 +30,13 @@ class Enforcer:
         """
         self.policy = policy
         self.tracker = tracker
+        # Track last notification times and messages to prevent duplicate notifications
+        # Format: {username: {notification_key: (timestamp, remaining_time)}}
+        self._last_notifications: Dict[str, Dict[str, Tuple[float, float]]] = (
+            defaultdict(dict)
+        )
+        # Minimum time between similar notifications in seconds
+        self._notification_cooldown = 300  # 5 minutes
         self._grace_period_users = set()
 
     async def enforce_user(self, username):
@@ -58,20 +67,77 @@ class Enforcer:
                 self._grace_period_users.remove(username)
             return
 
+        now = time.time()
+
+        # Use debounced notifications to prevent duplicate messages
         if remaining_time <= 60:
-            logger.info(f"User {username} has 1 minute left.")
-            await self.notify_user(username, "1 minute left!", category="critical")
+            if self._should_send_notification(username, "1min", remaining_time, now):
+                logger.info(f"User {username} has 1 minute left.")
+                await self.notify_user(username, "1 minute left!", category="critical")
+                self._last_notifications[username]["1min"] = (now, remaining_time)
         elif remaining_time <= 300:
-            logger.info(f"User {username} has 5 minutes left.")
-            await self.notify_user(username, "5 minutes left!", category="warning")
+            if self._should_send_notification(username, "5min", remaining_time, now):
+                logger.info(f"User {username} has 5 minutes left.")
+                await self.notify_user(username, "5 minutes left!", category="warning")
+                self._last_notifications[username]["5min"] = (now, remaining_time)
         elif remaining_time <= 600 and remaining_time < total_time / 2:
-            logger.info(f"User {username} has 10 minutes left.")
-            await self.notify_user(username, "10 minutes left!", category="info")
+            if self._should_send_notification(username, "10min", remaining_time, now):
+                logger.info(f"User {username} has 10 minutes left.")
+                await self.notify_user(username, "10 minutes left!", category="info")
+                self._last_notifications[username]["10min"] = (now, remaining_time)
         elif remaining_time <= total_time / 2:
-            logger.info(f"User {username} has used 50% of their time.")
-            await self.notify_user(
-                username, "50% of your time is used.", category="info"
+            if self._should_send_notification(username, "50pct", remaining_time, now):
+                logger.info(f"User {username} has used 50% of their time.")
+                await self.notify_user(
+                    username, "50% of your time is used.", category="info"
+                )
+                self._last_notifications[username]["50pct"] = (now, remaining_time)
+
+    def _should_send_notification(
+        self,
+        username: str,
+        notification_key: str,
+        current_remaining_time: float,
+        current_time: float,
+    ) -> bool:
+        """
+        Determines if a notification should be sent based on cooldown and time change.
+
+        Args:
+            username: The user to check
+            notification_key: Type of notification (e.g., "1min", "5min")
+            current_remaining_time: Current remaining time in minutes
+            current_time: Current timestamp
+
+        Returns:
+            bool: True if notification should be sent
+        """
+        if (
+            username not in self._last_notifications
+            or notification_key not in self._last_notifications[username]
+        ):
+            # No previous notification of this type
+            return True
+
+        last_time, last_remaining = self._last_notifications[username][notification_key]
+        time_elapsed = current_time - last_time
+
+        # Don't send if we're still in cooldown period
+        if time_elapsed < self._notification_cooldown:
+            logger.debug(
+                f"Skipping {notification_key} notification for {username} - cooldown active for {self._notification_cooldown - time_elapsed:.1f}s more"
             )
+            return False
+
+        # Send if remaining time has changed significantly (>= 1 minute difference)
+        # or if enough time has passed since last notification (>= cooldown period)
+        if (
+            abs(current_remaining_time - last_remaining) >= 60
+            or time_elapsed >= self._notification_cooldown
+        ):
+            return True
+
+        return False
 
     async def handle_grace_period(self, username):
         """
