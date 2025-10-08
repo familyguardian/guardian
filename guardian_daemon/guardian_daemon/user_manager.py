@@ -687,10 +687,6 @@ class UserManager:
                     combined_times = "|".join(time_specs)
                     rules.append(f"*;*;{username};{combined_times}")
 
-                    # Add a deny rule for this user for all other times
-                    # This explicitly denies the user outside their allowed times
-                    rules.append(f"*;*;{username};!Al0000-2400")
-
         # Finally, add a rule to allow all users not in kids group at all times
         # This must come AFTER the specific user rules due to "first match wins"
         rules.append("*;*;!@kids;Al0000-2400")
