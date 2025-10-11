@@ -257,7 +257,7 @@ class GuardianIPCServer:
         """
         Resets the daily quota for all users (deletes sessions since last reset).
         """
-        await self.tracker.perform_daily_reset()
+        await self.tracker.perform_daily_reset(force=True)
         logger.info("Quota reset for all users via IPC")
         return json.dumps({"status": "quota reset"})
 

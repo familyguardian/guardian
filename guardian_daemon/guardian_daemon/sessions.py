@@ -317,16 +317,61 @@ class SessionTracker:
         Periodically update all active sessions in the database with current duration.
         This is critical for preserving session time across daemon restarts.
         """
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        logind = bus.get_proxy_object(
+            "org.freedesktop.login1", "/org/freedesktop/login1", await bus.introspect("org.freedesktop.login1", "/org/freedesktop/login1")
+        )
+        manager = logind.get_interface("org.freedesktop.login1.Manager")
+
         while True:
             try:
                 now = time.time()
-                async with self.session_lock:
-                    for session_id, session in self.active_sessions.items():
+                active_session_ids = list(self.active_sessions.keys())
+
+                for session_id in active_session_ids:
+                    session = self.active_sessions.get(session_id)
+                    if not session:
+                        continue
+
+                    try:
+                        session_path = await manager.call_get_session(session_id)
+                        session_obj = bus.get_proxy_object(
+                            "org.freedesktop.login1",
+                            session_path,
+                            await bus.introspect("org.freedesktop.login1", session_path),
+                        )
+                        session_iface = session_obj.get_interface(
+                            "org.freedesktop.login1.Session"
+                        )
+                        is_locked = await session_iface.get_locked_hint()
+
+                        # If session is locked, we should not accumulate time
+                        if is_locked:
+                            logger.debug(
+                                f"Session {session_id} for user {session['username']} is locked, pausing time accumulation."
+                            )
+                            # By continuing, we skip the duration update for this locked session
+                            continue
+
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to check lock state for session {session_id}: {e}"
+                        )
+
+                    async with self.session_lock:
+                        # Re-fetch session data in case it changed
+                        session = self.active_sessions.get(session_id)
+                        if not session:
+                            continue
+
                         # Calculate raw duration since session start
                         raw_duration = now - session["start_time"]
                         # Subtract any locked-period durations so locked time isn't counted/frozen
                         locked_periods = self.session_locks.get(session_id, [])
-                        locked_seconds = sum((lock_end or now) - lock_start for lock_start, lock_end in locked_periods)
+                        locked_seconds = sum(
+                            (lock_end or now) - lock_start
+                            for lock_start, lock_end in locked_periods
+                        )
                         duration = max(0.0, raw_duration - locked_seconds)
 
                         # Log useful debugging information about the session
@@ -812,7 +857,7 @@ class SessionTracker:
         except Exception:
             return str(uid)
 
-    async def perform_daily_reset(self):
+    async def perform_daily_reset(self, force=False):
         """
         Perform daily reset: summarize sessions, create history entries,
         clean up sessions table, and reset quotas.
@@ -825,8 +870,8 @@ class SessionTracker:
         today = datetime.date.today().strftime("%Y-%m-%d")
         last_reset_date = self.storage.get_last_reset_date()
 
-        # Check if we already reset today
-        if last_reset_date == today:
+        # Check if we already reset today (unless forced)
+        if last_reset_date == today and not force:
             logger.debug(f"Daily reset already performed today ({today})")
             return
 
