@@ -70,17 +70,18 @@ class Enforcer:
         now = time.time()
 
         # Use debounced notifications to prevent duplicate messages
-        if remaining_time <= 60:
+        # Notify at 1, 5, and 10 minutes remaining (thresholds in minutes)
+        if remaining_time <= 1:
             if self._should_send_notification(username, "1min", remaining_time, now):
                 logger.info(f"User {username} has 1 minute left.")
                 await self.notify_user(username, "1 minute left!", category="critical")
                 self._last_notifications[username]["1min"] = (now, remaining_time)
-        elif remaining_time <= 300:
+        elif remaining_time <= 5:
             if self._should_send_notification(username, "5min", remaining_time, now):
                 logger.info(f"User {username} has 5 minutes left.")
                 await self.notify_user(username, "5 minutes left!", category="warning")
                 self._last_notifications[username]["5min"] = (now, remaining_time)
-        elif remaining_time <= 600 and remaining_time < total_time / 2:
+        elif remaining_time <= 10 and remaining_time < total_time / 2:
             if self._should_send_notification(username, "10min", remaining_time, now):
                 logger.info(f"User {username} has 10 minutes left.")
                 await self.notify_user(username, "10 minutes left!", category="info")
@@ -131,8 +132,9 @@ class Enforcer:
 
         # Send if remaining time has changed significantly (>= 1 minute difference)
         # or if enough time has passed since last notification (>= cooldown period)
+        # Send if remaining time has changed significantly (>= 1 minute difference)
         if (
-            abs(current_remaining_time - last_remaining) >= 60
+            abs(current_remaining_time - last_remaining) >= 1
             or time_elapsed >= self._notification_cooldown
         ):
             return True

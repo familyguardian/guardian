@@ -298,10 +298,17 @@ class SessionTracker:
                 for i in range(len(self.session_locks[session_id]) - 1, -1, -1):
                     lock_start, lock_end = self.session_locks[session_id][i]
                     if lock_end is None:
+                        # Mark lock end and adjust session start to exclude locked period
                         self.session_locks[session_id][i] = (lock_start, timestamp)
+                        session = self.active_sessions.get(session_id)
+                        if session:
+                            locked_duration = timestamp - lock_start
+                            session["start_time"] += locked_duration
                         logger.debug(
-                            f"Session {session_id}: screen unlocked at {timestamp}"
+                            f"Session {session_id}: screen unlocked at {timestamp}, excluded {locked_duration:.1f}s locked"
                         )
+                        # Remove the processed lock entry
+                        self.session_locks[session_id].pop(i)
                         break
             # No longer updating DB here; periodic task handles it.
 
@@ -315,8 +322,12 @@ class SessionTracker:
                 now = time.time()
                 async with self.session_lock:
                     for session_id, session in self.active_sessions.items():
-                        # Calculate current duration based on adjusted start time
-                        duration = now - session["start_time"]
+                        # Calculate raw duration since session start
+                        raw_duration = now - session["start_time"]
+                        # Subtract any locked-period durations so locked time isn't counted/frozen
+                        locked_periods = self.session_locks.get(session_id, [])
+                        locked_seconds = sum((lock_end or now) - lock_start for lock_start, lock_end in locked_periods)
+                        duration = max(0.0, raw_duration - locked_seconds)
 
                         # Log useful debugging information about the session
                         username = session.get("username", "unknown")
@@ -949,10 +960,8 @@ class GuardianDaemonInterface(ServiceInterface):
         super().__init__("org.guardian.Daemon")
         self.session_tracker = session_tracker
 
-    @method()
-    async def LockEvent(
-        self, session_id: "s", username: "s", locked: "b", timestamp: "d"  # noqa: F821
-    ):
+    @method(signature='ssbd')
+    async def LockEvent(self, session_id, username, locked, timestamp):
         """
         Receives lock/unlock events from agents and forwards to SessionTracker.
         """
