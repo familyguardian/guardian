@@ -960,7 +960,7 @@ class GuardianDaemonInterface(ServiceInterface):
         super().__init__("org.guardian.Daemon")
         self.session_tracker = session_tracker
 
-    @method(signature='ssbd')
+    @method(in_signature='ssbd')
     async def LockEvent(self, session_id, username, locked, timestamp):
         """
         Receives lock/unlock events from agents and forwards to SessionTracker.
