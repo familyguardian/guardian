@@ -960,8 +960,12 @@ class GuardianDaemonInterface(ServiceInterface):
         super().__init__("org.guardian.Daemon")
         self.session_tracker = session_tracker
 
-    @method(in_signature='ssbd')
-    async def LockEvent(self, session_id, username, locked, timestamp):
+    # The D-Bus signature is defined using string annotations, which is required by dbus-next.
+    # Pylance reports these as undefined variables, so we suppress the warning.
+    @method()
+    async def LockEvent(
+        self, session_id: "s", username: "s", locked: "b", timestamp: "d"  # pyright: ignore[reportUndefinedVariable] # noqa: F821
+    ):
         """
         Receives lock/unlock events from agents and forwards to SessionTracker.
         """
