@@ -10,10 +10,13 @@ import pwd
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from guardian_daemon.logging import get_logger
 from guardian_daemon.policy import Policy
-from guardian_daemon.sessions import SessionTracker
+
+if TYPE_CHECKING:
+    from guardian_daemon.sessions import SessionTracker
 
 logger = get_logger("UserManager")
 

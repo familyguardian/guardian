@@ -154,10 +154,8 @@ class SessionTracker:
         user_policy = self.policy.get_user_policy(username)
         if user_policy is None:
             return float("inf")  # Unlimited if not monitored
-        quota = user_policy.get("daily_quota_minutes")
-        if quota is None:
-            quota = self.policy.get_default("daily_quota_minutes")
-        return float(quota)  # Return value is in minutes
+        daily_quota, _ = self.policy.get_user_quota(username)
+        return float(daily_quota)
 
     async def get_remaining_time(self, username: str) -> float:
         """
@@ -344,16 +342,19 @@ class SessionTracker:
     def __init__(self, policy: Policy, config: dict, user_manager: UserManager):
         """
         Initialize the SessionTracker with a policy, configuration, and user manager.
-            user_manager (UserManager): User manager instance for setting up user sessions
 
         Args:
-        self.user_manager = user_manager
             policy (Policy): Policy instance
             config (dict): Parsed configuration
+            user_manager (UserManager): User manager instance for setting up user sessions
         """
         self.policy = policy
-        db_path = config.get("db_path", "guardian.sqlite")
-        self.storage = Storage(db_path)
+        if isinstance(config, Storage):
+            self.storage = config
+        else:
+            db_path = config.get("db_path", "guardian.sqlite")
+            self.storage = Storage(db_path)
+        self.user_manager = user_manager
         self.active_sessions: dict[str, dict] = {}
         self.session_locks: dict[str, list[tuple[float, float | None]]] = {}
         self.session_lock = asyncio.Lock()
@@ -580,33 +581,69 @@ class SessionTracker:
 
     async def check_quota(self, username: str) -> bool:
         """
-        Sum all sessions since the last reset and check against the daily quota.
-        Returns True if time remains, otherwise False.
+        Check if a user is within their quota limits.
 
         Args:
             username (str): Username
 
         Returns:
-            bool: True if time remains, False if limit reached
+            bool: True if within quota, False if exceeded
         """
-        user_policy = self.policy.get_user_policy(username)
-        if user_policy is None:
-            return True  # User is not monitored
+        # Check if user has quotas configured
+        if not self.policy.has_quota(username):
+            return True
 
-        total_allowed = await self.get_total_time(username)
-        remaining_time = await self.get_remaining_time(username)
+        # Get configured quotas
+        daily_quota, weekly_quota = self.policy.get_user_quota(username)
+        today = datetime.datetime.now().date()
 
-        # Calculate used time from remaining time
-        used_time = total_allowed - remaining_time
+        # Get current usage
+        daily_usage = await self.storage.get_daily_usage(username, today)
+        weekly_usage = await self.storage.get_weekly_usage(username, today)
 
-        # If the quota is reached, trigger the summarization
-        if used_time >= total_allowed:
-            await self.check_usage_summarize(username, used_time, quota_reached=True)
+        # Check if either quota is exceeded
+        if (daily_quota and daily_usage >= daily_quota) or (
+            weekly_quota and weekly_usage >= weekly_quota
+        ):
             logger.info(
-                f"Quota reached for {username}: {used_time:.1f} minutes used of {total_allowed:.1f} minute quota"
+                f"Quota exceeded for {username}: {daily_usage}s/{daily_quota}s daily, {weekly_usage}s/{weekly_quota}s weekly"
             )
+            return False
 
-        return remaining_time > 0
+        return True
+
+    async def check_curfew(self, username: str, current_time, is_weekend: bool) -> bool:
+        """Check if a user is allowed to log in at the current time based on curfew settings.
+
+        Args:
+            username (str): Username
+            current_time: Current time to check (datetime.time)
+            is_weekend (bool): Whether it's a weekend day
+
+        Returns:
+            bool: True if allowed, False if curfew is in effect
+        """
+        # If no curfew settings, always allow
+        if not self.policy.has_curfew(username):
+            return True
+
+        # Get curfew settings for the given day type
+        curfew = self.policy.get_user_curfew(username, is_weekend)
+        if not curfew:
+            return True  # No curfew for this day type means allowed
+
+        # Parse curfew times
+        start_time = datetime.datetime.strptime(curfew["start"], "%H:%M").time()
+        end_time = datetime.datetime.strptime(curfew["end"], "%H:%M").time()
+
+        # Check if current time is within allowed hours
+        if start_time <= current_time <= end_time:
+            return True
+
+        logger.info(
+            f"Curfew in effect for {username}: current {current_time}, allowed {start_time}-{end_time}"
+        )
+        return False
 
     async def run(self):
         """

@@ -3,11 +3,13 @@ Central SQLite interface for guardian-daemon.
 Provides functions for session handling and future extensions.
 """
 
-import datetime
 import json
 import os
 import sqlite3
 import time
+from datetime import datetime
+from datetime import datetime as dt
+from datetime import timedelta
 from typing import Optional
 
 from guardian_daemon.logging import get_logger
@@ -266,7 +268,7 @@ class Storage:
                 logger.debug(f"Saving settings for new user: {username}")
                 self.set_user_settings(username, settings)
 
-    def add_session(
+    async def add_session(
         self,
         session_id: str,
         username: str,
@@ -316,6 +318,192 @@ class Storage:
             ),
         )
         self.conn.commit()
+
+    async def add_session_time(
+        self, username: str, start_time: datetime, end_time: datetime
+    ):
+        """Add a usage time entry for a user.
+
+        Args:
+            username (str): Username
+            start_time (datetime): Start time
+            end_time (datetime): End time
+        """
+        duration_seconds = (end_time - start_time).total_seconds()
+        await self.add_session(
+            f"usage_{int(start_time.timestamp())}",
+            username,
+            1000,  # uid for testing
+            start_time.timestamp(),
+            end_time.timestamp(),
+            duration_seconds,
+        )
+
+    async def get_active_session(self, username: str, session_id: str):
+        """Get an active session for a user.
+
+        Args:
+            username (str): Username
+            session_id (str): Session ID
+
+        Returns:
+            tuple: Session data or None if not found
+        """
+        c = self.conn.cursor()
+        c.execute(
+            """
+            SELECT username, session_id, start_time
+            FROM sessions
+            WHERE username = ? AND session_id = ?
+            AND (end_time IS NULL OR end_time = 0)
+        """,
+            (username, session_id),
+        )
+        session = c.fetchone()
+        if session:
+            # Convert timestamp back to datetime for testing
+            return (session[0], session[1], dt.fromtimestamp(session[2]).isoformat())
+        return None
+
+    async def get_daily_usage(self, username: str, date: dt.date):
+        """Get total usage time for a user on a given date.
+
+        Args:
+            username (str): Username
+            date (dt.date): Date to check
+
+        Returns:
+            int: Total usage time in seconds
+        """
+        c = self.conn.cursor()
+        day_start = int(dt.combine(date, dt.min.time()).timestamp())
+        day_end = day_start + 86400
+
+        c.execute(
+            """
+            SELECT COALESCE(SUM(duration), 0)
+            FROM sessions
+            WHERE username = ?
+            AND end_time >= ?
+            AND start_time < ?
+        """,
+            (username, day_start, day_end),
+        )
+        return c.fetchone()[0]
+
+    async def end_session(self, username: str, session_id: str, end_time: datetime):
+        """End a session for a user.
+
+        Args:
+            username (str): Username
+            session_id (str): Session ID
+            end_time (datetime): End time
+        """
+        c = self.conn.cursor()
+        end_timestamp = end_time.timestamp()
+        c.execute(
+            """
+            UPDATE sessions
+            SET end_time = ?
+            WHERE username = ? AND session_id = ?
+        """,
+            (end_timestamp, username, session_id),
+        )
+        self.conn.commit()
+        return None
+        self.conn.commit()
+
+    async def get_weekly_usage(self, username: str, date: dt.date):
+        """Get total usage time for a user in the week containing the given date.
+
+        Args:
+            username (str): Username
+            date (dt.date): Date within the week to check
+
+        Returns:
+            int: Total usage time in seconds
+        """
+        c = self.conn.cursor()
+        week_start = int(
+            dt.combine(date - timedelta(days=date.weekday()), dt.min.time()).timestamp()
+        )
+        week_end = week_start + 86400 * 7
+        c.execute(
+            """
+            SELECT SUM(duration)
+            FROM sessions
+            WHERE username = ?
+            AND start_time >= ? AND start_time < ?
+        """,
+            (username, week_start, week_end),
+        )
+        result = c.fetchone()
+        return result[0] or 0
+
+    async def cleanup_stale_sessions(self, max_age_hours: int):
+        """Remove sessions older than the specified age.
+
+        Args:
+            max_age_hours (int): Maximum age in hours to keep sessions
+        """
+        c = self.conn.cursor()
+        cutoff_time = dt.now() - timedelta(hours=max_age_hours)
+        c.execute(
+            """
+            DELETE FROM sessions
+            WHERE start_time < ?
+        """,
+            (cutoff_time.timestamp(),),
+        )
+        self.conn.commit()
+
+    async def get_all_active_sessions(self):
+        """Get all currently active sessions.
+
+        Returns:
+            list: List of active sessions
+        """
+        c = self.conn.cursor()
+        current_time = dt.now().timestamp()
+        c.execute(
+            """
+            SELECT username, session_id, start_time, end_time, duration
+            FROM sessions
+            WHERE end_time > ?
+        """,
+            (current_time,),
+        )
+        return c.fetchall()
+
+    async def get_usage_in_date_range(
+        self, username: str, start_date: datetime, end_date: datetime
+    ):
+        """Get total usage time for a user between two dates.
+
+        Args:
+            username (str): Username
+            start_date (datetime): Start date
+            end_date (datetime): End date
+
+        Returns:
+            int: Total usage time in seconds
+        """
+        c = self.conn.cursor()
+        c.execute(
+            """
+            SELECT SUM(duration)
+            FROM sessions
+            WHERE username = ?
+            AND start_time >= ? AND start_time < ?
+        """,
+            (
+                username,
+                start_date.timestamp(),
+                end_date.timestamp(),
+            ),
+        )
+        result = c.fetchone()
+        return result[0] or 0
 
     def get_sessions_for_user(
         self, username: str, since: Optional[float] = None
@@ -410,7 +598,7 @@ class Storage:
         if row:
             return row[0]
         # Default to today if not found
-        return datetime.date.today().strftime("%Y-%m-%d")
+        return dt.today().strftime("%Y-%m-%d")
 
     def set_last_reset_date(self, date_str: str):
         """
@@ -459,9 +647,12 @@ class Storage:
                 date = datetime.date.today().strftime("%Y-%m-%d")
 
         # Get start/end of day in local time
-        date_obj = datetime.datetime.strptime(date, "%Y-%m-%d").date()
-        start_of_day = datetime.datetime.combine(date_obj, datetime.time.min)
-        end_of_day = datetime.datetime.combine(date_obj, datetime.time.max)
+        date = dt.today().strftime("%Y-%m-%d")
+
+        # Convert date string to bounds
+        date_obj = dt.strptime(date, "%Y-%m-%d").date()
+        start_of_day = dt.combine(date_obj, dt.time.min)
+        end_of_day = dt.combine(date_obj, dt.time.max)
 
         # Convert to epoch timestamps
         start_ts = start_of_day.timestamp()

@@ -54,7 +54,9 @@ class Policy:
 
     def get_user_quota(self, username: str) -> tuple[int, int]:
         """Get daily and weekly quota for a user."""
-        user_settings = self.data.get("users", {}).get(username, {})
+        if username not in self.data.get("users", {}):
+            raise KeyError(f"User {username} not found in policy")
+        user_settings = self.data["users"][username]
         quota = user_settings.get("quota", {})
         daily = quota.get("daily", 0)
         weekly = quota.get("weekly", 0)
@@ -71,7 +73,11 @@ class Policy:
 
     def get_monitored_users(self) -> list[str]:
         """Get list of all monitored users."""
-        return list(self.data.get("users", {}).keys())
+        return [
+            username
+            for username, settings in self.data.get("users", {}).items()
+            if self.has_quota(username) or self.has_curfew(username)
+        ]
 
     def get_user_policy(self, username: str) -> Optional[Dict[str, Any]]:
         """
