@@ -15,6 +15,7 @@ from dbus_next.constants import BusType
 from guardian_daemon.logging import get_logger
 from guardian_daemon.policy import Policy
 from guardian_daemon.sessions import SessionTracker
+from guardian_daemon.user_manager import UserManager
 
 logger = get_logger("Enforcer")
 
@@ -38,6 +39,7 @@ class Enforcer:
         # Minimum time between similar notifications in seconds
         self._notification_cooldown = 300  # 5 minutes
         self._grace_period_users = set()
+        self.user_manager = UserManager()
 
     async def enforce_user(self, username):
         """
@@ -310,6 +312,3 @@ class Enforcer:
 
         except Exception as e:
             logger.error(f"Failed to send notification to {username}: {e}")
-
-
-# Quota/Curfew enforcement

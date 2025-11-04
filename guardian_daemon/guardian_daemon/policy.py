@@ -42,6 +42,37 @@ class Policy:
         self.storage.sync_config_to_db(self.data)
         logger.info("Policy loaded and synchronized to DB")
 
+    def has_quota(self, username: str) -> bool:
+        """Check if a user has quota settings."""
+        user_settings = self.data.get("users", {}).get(username, {})
+        return "quota" in user_settings
+
+    def has_curfew(self, username: str) -> bool:
+        """Check if a user has curfew settings."""
+        user_settings = self.data.get("users", {}).get(username, {})
+        return "curfew" in user_settings
+
+    def get_user_quota(self, username: str) -> tuple[int, int]:
+        """Get daily and weekly quota for a user."""
+        user_settings = self.data.get("users", {}).get(username, {})
+        quota = user_settings.get("quota", {})
+        daily = quota.get("daily", 0)
+        weekly = quota.get("weekly", 0)
+        return daily, weekly
+
+    def get_user_curfew(
+        self, username: str, is_weekend: bool
+    ) -> Optional[dict[str, str]]:
+        """Get curfew settings for a user."""
+        user_settings = self.data.get("users", {}).get(username, {})
+        curfew = user_settings.get("curfew", {})
+        period = "weekend" if is_weekend else "weekday"
+        return curfew.get(period)
+
+    def get_monitored_users(self) -> list[str]:
+        """Get list of all monitored users."""
+        return list(self.data.get("users", {}).keys())
+
     def get_user_policy(self, username: str) -> Optional[Dict[str, Any]]:
         """
         Return the policy settings for a specific user.

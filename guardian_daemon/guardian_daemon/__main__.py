@@ -31,10 +31,10 @@ class GuardianDaemon:
         self.config = config
         db_path = self.config.get("db_path", "guardian.sqlite")
 
-        self.policy = Policy()
+        self.policy = Policy(self.config.config_path)
         self.storage = Storage(db_path)
-        self.usermanager = UserManager(self.policy)
         self.systemd = SystemdManager()
+        self.usermanager = UserManager(self.policy)
         self.tracker = SessionTracker(self.policy, self.config, self.usermanager)
         self.enforcer = Enforcer(self.policy, self.tracker)
         self.ipc_server = GuardianIPCServer(self.config, self.tracker, self.policy)
@@ -60,7 +60,7 @@ class GuardianDaemon:
             new_hash = self._get_config_hash()
             if new_hash != old_hash:
                 logger.info("Config changed, updating timers and UserManager rules.")
-                self.usermanager = UserManager(self.policy)
+                self.usermanager.update_policy(self.policy)
                 # Clean up any existing duplicates in time.conf before writing new rules
                 self.usermanager._cleanup_time_conf()
                 self.usermanager.write_time_rules()
@@ -130,7 +130,7 @@ class GuardianDaemon:
         # Curfew timer setup (example: use start/end from policy)
         curfew = self.policy.data.get("curfew", {})
         start_time = curfew.get("start", "22:00")
-        end_time = curfew.get("end", "09:00")
+        end_time = curfew.get("end", "06:00")
         self.systemd.create_curfew_timer(start_time, end_time)
         await self.systemd.reload_systemd()
         await self.check_and_recover_reset()

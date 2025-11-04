@@ -13,6 +13,7 @@ from pathlib import Path
 
 from guardian_daemon.logging import get_logger
 from guardian_daemon.policy import Policy
+from guardian_daemon.sessions import SessionTracker
 
 logger = get_logger("UserManager")
 
@@ -355,11 +356,50 @@ class UserManager:
     Manages user-specific configurations, including PAM time rules and systemd services.
     """
 
-    def __init__(self, policy: Policy):
+    def __init__(self, policy: Policy, tracker: "SessionTracker"):
         """
         Initialize the UserManager with a policy instance.
         """
         self.policy = policy
+        self.tracker = tracker
+
+    def setup_user_login(self, username: str) -> bool:
+        """
+        Comprehensive setup for a user upon login.
+        Ensures group membership, PAM rules, and systemd service are correctly configured.
+        """
+        logger.info(f"Performing comprehensive login setup for user '{username}'")
+
+        if not self.user_exists(username):
+            logger.error(f"User '{username}' does not exist. Aborting setup.")
+            return False
+
+        try:
+            # 1. Ensure group memberships are correct
+            self.ensure_kids_group()
+
+            # 2. Ensure PAM time rules are up-to-date
+            self.write_time_rules()
+
+            # 3. Ensure the user's agent service is set up and ready to run
+            self.ensure_systemd_user_service(username)
+
+            logger.info(f"Successfully completed login setup for user '{username}'")
+            return True
+        except Exception as e:
+            logger.error(f"An error occurred during login setup for '{username}': {e}")
+            return False
+
+    def update_policy(self, policy: Policy):
+        """
+        Update the policy instance and re-evaluate rules.
+        """
+        self.policy = policy
+        self.write_time_rules()
+        self.ensure_kids_group()
+        for username in self.policy.data.get("users", {}):
+            if self.user_exists(username):
+                self.setup_user_service(username)
 
     def write_time_rules(self):
         """
@@ -694,9 +734,6 @@ class UserManager:
         logger.debug(f"Generated {len(rules)} PAM time rules.")
         return rules
 
-        logger.debug(f"Generated {len(rules)} PAM time rules.")
-        return rules
-
     def remove_time_rules(self):
         """
         Remove time rules set by guardian-daemon from /etc/security/time.conf.
@@ -1027,19 +1064,8 @@ class UserManager:
         except Exception as e:
             logger.error(f"Failed to ensure systemd user service for {username}: {e}")
 
-    def setup_user_login(self, username: str):
-        """
-        Performs all required setup steps for a user at login.
-        This is the main entry point from SessionTracker when a user logs in.
+        # User login setup continues in the main setup_user_login method
 
-        This method:
-        1. Updates PAM time rules
-        2. Ensures user is in required groups (kids and users)
-        3. Sets up and activates the user's systemd service
-
-        Args:
-            username (str): Username of the user logging in
-        """
         if not self.user_exists(username):
             logger.warning(f"User '{username}' does not exist, cannot set up login.")
             return False
