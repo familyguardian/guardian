@@ -359,11 +359,16 @@ class UserManager:
     Manages user-specific configurations, including PAM time rules and systemd services.
     """
 
-    def __init__(self, policy: Policy, tracker: "SessionTracker"):
+    def __init__(self, policy: Policy = None, tracker: "SessionTracker" = None):
         """
-        Initialize the UserManager with a policy instance.
+        Initialize the UserManager with a policy instance and optionally a session tracker.
+        The tracker can be set later using set_tracker() to avoid circular dependencies.
         """
         self.policy = policy
+        self.tracker = tracker
+
+    def set_tracker(self, tracker: "SessionTracker"):
+        """Set the session tracker after initialization to resolve circular dependencies."""
         self.tracker = tracker
 
     def setup_user_login(self, username: str) -> bool:

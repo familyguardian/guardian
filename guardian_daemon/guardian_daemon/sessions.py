@@ -511,7 +511,7 @@ class SessionTracker:
         # Create session entry with end_time and duration=0
         async with self.session_lock:
             start_time = self.active_sessions[session_id]["start_time"]
-        self.storage.add_session(
+        await self.storage.add_session(
             session_id,
             username,
             uid,

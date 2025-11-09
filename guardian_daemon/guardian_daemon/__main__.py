@@ -34,8 +34,9 @@ class GuardianDaemon:
         self.policy = Policy(self.config.config_path)
         self.storage = Storage(db_path)
         self.systemd = SystemdManager()
-        self.usermanager = UserManager(self.policy)
+        self.usermanager = UserManager(self.policy)  # Initialize without tracker first
         self.tracker = SessionTracker(self.policy, self.config, self.usermanager)
+        self.usermanager.set_tracker(self.tracker)  # Set tracker after initialization
         self.enforcer = Enforcer(self.policy, self.tracker)
         self.ipc_server = GuardianIPCServer(self.config, self.tracker, self.policy)
         self.last_config_hash = self._get_config_hash()
