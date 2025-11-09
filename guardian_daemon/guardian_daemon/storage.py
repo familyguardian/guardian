@@ -6,6 +6,7 @@ Provides functions for session handling and future extensions.
 import json
 import os
 import sqlite3
+import threading
 import time
 from datetime import datetime
 from datetime import datetime as dt
@@ -98,15 +99,16 @@ class Storage:
         Returns:
             dict | None: Einstellungen des Nutzers oder None
         """
-        c = self.conn.cursor()
-        logger.debug(f"Fetching settings for user: {username}")
-        c.execute("SELECT settings FROM user_settings WHERE username=?", (username,))
-        row = c.fetchone()
-        if row:
-            logger.debug(f"Settings found for user: {username}")
-            return json.loads(row[0])
-        logger.debug(f"No settings found for user: {username}")
-        return None
+        with self._db_lock:
+            c = self.conn.cursor()
+            logger.debug(f"Fetching settings for user: {username}")
+            c.execute("SELECT settings FROM user_settings WHERE username=?", (username,))
+            row = c.fetchone()
+            if row:
+                logger.debug(f"Settings found for user: {username}")
+                return json.loads(row[0])
+            logger.debug(f"No settings found for user: {username}")
+            return None
 
     def set_user_settings(self, username: str, settings: dict):
         """
@@ -116,13 +118,14 @@ class Storage:
             username (str): Nutzername
             settings (dict): Einstellungen
         """
-        c = self.conn.cursor()
-        logger.info(f"Storing settings for user: {username}")
-        c.execute(
-            "INSERT OR REPLACE INTO user_settings (username, settings) VALUES (?, ?)",
-            (username, json.dumps(settings)),
-        )
-        self.conn.commit()
+        with self._db_lock:
+            c = self.conn.cursor()
+            logger.info(f"Storing settings for user: {username}")
+            c.execute(
+                "INSERT OR REPLACE INTO user_settings (username, settings) VALUES (?, ?)",
+                (username, json.dumps(settings)),
+            )
+            self.conn.commit()
 
     def update_session_logout(
         self, session_id: str, end_time: float, duration_seconds: float
@@ -158,7 +161,11 @@ class Storage:
         parent_dir = os.path.dirname(self.db_path)
         if parent_dir and not os.path.exists(parent_dir):
             os.makedirs(parent_dir, exist_ok=True)
-        self.conn = sqlite3.connect(self.db_path)
+        # Use check_same_thread=False to allow access from asyncio.to_thread() calls
+        # This is safe because we use proper locking for concurrent access
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        # Add a threading lock for thread-safe database operations
+        self._db_lock = threading.Lock()
         self._init_db()
 
     def _init_db(self):
