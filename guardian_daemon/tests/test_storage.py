@@ -19,12 +19,20 @@ def storage(test_config):
 @pytest.mark.asyncio
 async def test_storage_init(storage):
     """Test storage initialization."""
-    conn = storage.conn  # Access the sqlite connection
-    cur = conn.cursor()
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    table_names = {row[0] for row in cur.fetchall()}
+    # Check that engine and tables exist
+    assert storage.engine is not None
+    assert storage.SessionLocal is not None
+    
+    # Verify tables were created
+    from guardian_daemon.models import Base
+    from sqlalchemy import inspect
+    
+    inspector = inspect(storage.engine)
+    table_names = inspector.get_table_names()
     assert "sessions" in table_names
-    cur.close()
+    assert "user_settings" in table_names
+    assert "meta" in table_names
+    assert "history" in table_names
 
 
 @pytest.mark.asyncio
@@ -60,17 +68,19 @@ async def test_end_session(storage):
     session_id = "test_session_1"
     start_time = datetime.now()
 
-    # Add and end session
-    end_time = start_time + timedelta(hours=1)
+    # Add session - active session should have no end time
     duration_seconds = 3600  # 1 hour
     await storage.add_session(
         session_id=session_id,
         username=username,
         uid=1000,
         start_time=start_time.timestamp(),
-        end_time=end_time.timestamp(),
+        end_time=0,  # Active session
         duration_seconds=duration_seconds,
     )
+    
+    # End the session
+    end_time = start_time + timedelta(hours=1)
     await storage.end_session(username, session_id, end_time)
 
     # Verify session is no longer active
@@ -78,7 +88,7 @@ async def test_end_session(storage):
     assert session is None
 
     # Verify usage time was recorded
-    daily_usage = await storage.get_daily_usage(username, end_time.date())
+    daily_usage = await storage.get_daily_usage(username, start_time.date())
     assert daily_usage > 0
 
 
@@ -88,7 +98,7 @@ async def test_get_usage_time(storage):
     username = "testuser"
     now = datetime.now()
 
-    # Add a session with 1 hour duration
+    # Add a session with 1 hour duration (ended session)
     start_time = now - timedelta(hours=2)
     end_time = start_time + timedelta(hours=1)
     duration_seconds = 3600  # 1 hour in seconds
@@ -101,12 +111,12 @@ async def test_get_usage_time(storage):
         duration_seconds=duration_seconds,
     )
 
-    # Test daily usage
-    daily_usage = await storage.get_daily_usage(username, now.date())
+    # Test daily usage - use the start date of the session
+    daily_usage = await storage.get_daily_usage(username, start_time.date())
     assert daily_usage == 3600  # 1 hour in seconds
 
     # Test weekly usage
-    weekly_usage = await storage.get_weekly_usage(username, now.date())
+    weekly_usage = await storage.get_weekly_usage(username, start_time.date())
     assert weekly_usage == 3600
 
     # Test getting usage in range
@@ -135,18 +145,22 @@ async def test_cleanup_stale_sessions(storage):
         duration_seconds=duration,
     )
 
+    # Verify it was added
+    sessions = storage.get_sessions_for_user(username)
+    assert len(sessions) > 0
+
     # Run cleanup
     await storage.cleanup_stale_sessions(max_age_hours=24)
 
-    # Verify session was cleaned up
-    session = await storage.get_active_session(username, session_id)
-    assert session is None
+    # Verify session was cleaned up (shouldn't be any sessions left)
+    sessions_after = storage.get_sessions_for_user(username)
+    assert len(sessions_after) == 0
 
 
 @pytest.mark.asyncio
 async def test_get_all_active_sessions(storage):
     """Test retrieving all active sessions."""
-    # Add multiple sessions
+    # Add multiple active sessions (end_time=0 means active)
     sessions = [
         ("user1", "session1", datetime.now()),
         ("user2", "session2", datetime.now()),
@@ -154,14 +168,13 @@ async def test_get_all_active_sessions(storage):
     ]
 
     for username, session_id, start_time in sessions:
-        end_time = start_time + timedelta(hours=1)
         duration = 3600
         await storage.add_session(
             session_id=session_id,
             username=username,
             uid=1000,
             start_time=start_time.timestamp(),
-            end_time=end_time.timestamp(),
+            end_time=0,  # Active session
             duration_seconds=duration,
         )
 

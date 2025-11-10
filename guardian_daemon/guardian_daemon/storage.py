@@ -1,26 +1,34 @@
 """
-Central SQLite interface for guardian-daemon.
-Provides functions for session handling and future extensions.
+Central SQLAlchemy interface for guardian-daemon.
+Provides functions for session handling using SQLAlchemy ORM.
 """
 
+import asyncio
+import datetime
 import json
 import os
-import sqlite3
-import threading
-import time
-from datetime import datetime
 from datetime import datetime as dt
 from datetime import timedelta
 from typing import Optional
 
+from sqlalchemy import create_engine, select, update, delete, and_, or_, func
+from sqlalchemy.orm import sessionmaker, Session as SQLSession
+
 from guardian_daemon.logging import get_logger
+from guardian_daemon.models import Base, Session, UserSettings, Meta, History
 
 logger = get_logger("Storage")
 
 
 class Storage:
     """
-    Central SQLite interface for session and settings storage in Guardian Daemon.
+    Central SQLAlchemy interface for session and settings storage in Guardian Daemon.
+    
+    Key design changes:
+    - Uses SQLAlchemy ORM instead of raw SQL
+    - Session.id is autoincrement (not using logind session_id as primary key)
+    - logind_session_id is stored separately as it's transient
+    - Date field tracks which day the session belongs to
     """
 
     @staticmethod
@@ -38,75 +46,138 @@ class Storage:
         with open("/proc/stat") as f:
             for line in f:
                 if line.startswith("btime"):
-                    boot_time = int(line.strip().split()[1])
+                    boot_time = int(line.split()[1])
                     break
-            else:
-                raise RuntimeError(
-                    "Could not determine system boot time from /proc/stat"
-                )
         return boot_time + (logind_timestamp / 1_000_000)
 
-    def update_session_progress(self, session_id: str, duration_seconds: float):
+    def __init__(self, db_path: str):
         """
-        Periodically update session entry with current duration (while session is active).
-        This is critical for preserving session time across daemon restarts.
+        Initialize the Storage with the given database path.
 
         Args:
-            session_id (str): The session ID to update
-            duration_seconds (float): Duration in seconds
+            db_path (str): Path to SQLite database.
         """
-        c = self.conn.cursor()
-
-        # Verify the session exists and is still active
-        c.execute(
-            "SELECT session_id FROM sessions WHERE session_id = ? AND (end_time = 0 OR end_time IS NULL)",
-            (session_id,),
+        self.db_path = db_path
+        logger.info(f"Opening SQLite database at {self.db_path}")
+        
+        # Ensure parent directory exists
+        parent_dir = os.path.dirname(self.db_path)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir)
+        
+        # Create SQLAlchemy engine
+        self.engine = create_engine(
+            f"sqlite:///{self.db_path}",
+            echo=False,
+            connect_args={"check_same_thread": False}
         )
-        if not c.fetchone():
-            logger.warning(
-                f"Cannot update non-existent or closed session: {session_id}"
-            )
-            return
+        
+        # Create session factory
+        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
+        
+        # Initialize database schema
+        self._init_db()
 
-        # Update the duration, ensuring we don't accidentally decrease it
-        # This prevents any race conditions or timing issues from reducing tracked time
-        c.execute(
-            """
-            UPDATE sessions
-            SET duration = CASE
-                WHEN ? > duration OR duration IS NULL THEN ?
-                ELSE duration
-            END
-            WHERE session_id = ? AND (end_time = 0 OR end_time IS NULL)
-            """,
-            (duration_seconds, duration_seconds, session_id),
-        )
+    def _init_db(self):
+        """
+        Initialize the SQLite database schema if not present.
+        Uses Alembic migrations in production, but creates tables directly for simplicity.
+        """
+        try:
+            # Create all tables
+            Base.metadata.create_all(self.engine)
+            
+            # Set SQLite pragmas
+            with self.engine.connect() as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.commit()
+            
+            # Initialize default meta values
+            with self.SessionLocal() as session:
+                # Check if last_reset_date exists
+                result = session.execute(
+                    select(Meta).where(Meta.key == "last_reset_date")
+                ).first()
+                
+                if not result:
+                    meta = Meta(
+                        key="last_reset_date",
+                        value=dt.today().strftime("%Y-%m-%d")
+                    )
+                    session.add(meta)
+                    session.commit()
+            
+            logger.info("Database initialized successfully")
+        except Exception as e:
+            logger.error(f"DB error during database initialization: {e}")
+            raise
 
-        # Commit immediately to ensure data is persisted
-        self.conn.commit()
+    def sync_config_to_db(self, config: dict):
+        """
+        Synchronize configuration data to the database.
 
-        logger.debug(
-            f"Updated session progress for session_id: {session_id}, duration: {duration_seconds/60:.1f} min (from {duration_seconds:.1f} sec)"
-        )
+        Args:
+            config (dict): Configuration data
+        """
+        logger.info("Synchronizing config to database")
+        
+        with self.SessionLocal() as session:
+            # Check if default settings exist
+            result = session.execute(
+                select(UserSettings).where(UserSettings.username == "default")
+            ).first()
+            
+            if not result and "defaults" in config:
+                default_settings = UserSettings(
+                    username="default",
+                    settings=json.dumps(config["defaults"])
+                )
+                session.add(default_settings)
+            
+            # Add/update user settings
+            for username, settings in config.get("users", {}).items():
+                result = session.execute(
+                    select(UserSettings).where(UserSettings.username == username)
+                ).first()
+                
+                if result:
+                    # Update existing
+                    session.execute(
+                        update(UserSettings)
+                        .where(UserSettings.username == username)
+                        .values(settings=json.dumps(settings))
+                    )
+                else:
+                    # Create new
+                    user_settings = UserSettings(
+                        username=username,
+                        settings=json.dumps(settings)
+                    )
+                    session.add(user_settings)
+            
+            session.commit()
 
     def get_user_settings(self, username: str) -> Optional[dict]:
         """
         Retrieve user settings from the database for the given username.
 
         Args:
-            username (str): Nutzername
+            username (str): Username
 
         Returns:
-            dict | None: Einstellungen des Nutzers oder None
+            dict | None: User settings or None
         """
-        with self._db_lock:
-            c = self.conn.cursor()
-            logger.debug(f"Fetching settings for user: {username}")
-            c.execute("SELECT settings FROM user_settings WHERE username=?", (username,))
-            row = c.fetchone()
-            if row:
-                logger.debug(f"Settings found for user: {username}")
-                return json.loads(row[0])
+        logger.debug(f"Fetching settings for user: {username}")
+        
+        with self.SessionLocal() as session:
+            result = session.execute(
+                select(UserSettings).where(UserSettings.username == username)
+            ).scalar_one_or_none()
+            
+            if result:
+                return json.loads(result.settings)
+            
             logger.debug(f"No settings found for user: {username}")
             return None
 
@@ -115,165 +186,26 @@ class Storage:
         Store user settings in the database for the given username.
 
         Args:
-            username (str): Nutzername
-            settings (dict): Einstellungen
+            username (str): Username
+            settings (dict): Settings dictionary
         """
-        with self._db_lock:
-            c = self.conn.cursor()
-            logger.info(f"Storing settings for user: {username}")
-            c.execute(
-                "INSERT OR REPLACE INTO user_settings (username, settings) VALUES (?, ?)",
-                (username, json.dumps(settings)),
-            )
-            self.conn.commit()
-
-    def update_session_logout(
-        self, session_id: str, end_time: float, duration_seconds: float
-    ):
-        """
-        Update session entry with logout time and duration.
-
-        Args:
-            session_id (str): Session ID to update
-            end_time (float): End time in EPOCH seconds
-            duration_seconds (float): Session duration in seconds
-        """
-        c = self.conn.cursor()
-        logger.info(f"Updating session logout for session_id: {session_id}")
-        c.execute(
-            """
-            UPDATE sessions SET end_time = ?, duration = ? WHERE session_id = ? AND (end_time = 0 OR end_time IS NULL)
-        """,
-            (end_time, duration_seconds, session_id),
-        )
-        self.conn.commit()
-
-    def __init__(self, db_path: str):
-        """
-        Initialize the Storage with the given database path.
-
-        Args:
-            db_path (str): Pfad zur SQLite-Datenbank.
-        """
-        self.db_path = db_path
-        logger.info(f"Opening SQLite database at {self.db_path}")
-        # Ensure parent directory exists
-        parent_dir = os.path.dirname(self.db_path)
-        if parent_dir and not os.path.exists(parent_dir):
-            os.makedirs(parent_dir, exist_ok=True)
-        # Use check_same_thread=False to allow access from asyncio.to_thread() calls
-        # This is safe because we use proper locking for concurrent access
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        # Add a threading lock for thread-safe database operations
-        self._db_lock = threading.Lock()
-        self._init_db()
-
-    def _init_db(self):
-        """
-        Initialize the SQLite database schema if not present.
-        Also migrates schema to add missing columns.
-        """
-        try:
-            with self.conn:
-                logger.debug("Setting PRAGMA journal_mode=WAL and foreign_keys=ON")
-                self.conn.execute("PRAGMA journal_mode=WAL;")
-                self.conn.execute("PRAGMA foreign_keys=ON;")
-                logger.debug("Ensuring sessions and user_settings tables exist")
-                self.conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS sessions (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        session_id TEXT,
-                        username TEXT,
-                        uid INTEGER,
-                        start_time REAL,
-                        end_time REAL,
-                        duration REAL
-                    )
-                """
+        logger.info(f"Storing settings for user: {username}")
+        
+        with self.SessionLocal() as session:
+            result = session.execute(
+                select(UserSettings).where(UserSettings.username == username)
+            ).scalar_one_or_none()
+            
+            if result:
+                result.settings = json.dumps(settings)
+            else:
+                user_settings = UserSettings(
+                    username=username,
+                    settings=json.dumps(settings)
                 )
-                self.conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS user_settings (
-                        username TEXT PRIMARY KEY,
-                        settings TEXT
-                    )
-                """
-                )
-                c = self.conn.cursor()
-                c.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS meta (
-                        key TEXT PRIMARY KEY,
-                        value TEXT
-                    )
-                """
-                )
-
-                # Create history table for daily usage summaries
-                self.conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS history (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        username TEXT NOT NULL,
-                        date TEXT NOT NULL,  -- Store as YYYY-MM-DD
-                        total_screen_time INTEGER NOT NULL,  -- In seconds
-                        login_count INTEGER NOT NULL,
-                        first_login TEXT,  -- Timestamp
-                        last_logout TEXT,  -- Timestamp
-                        quota_exceeded BOOLEAN,
-                        bonus_time_used INTEGER,  -- In seconds
-                        created_at TEXT NOT NULL,  -- Timestamp when record was created
-                        UNIQUE(username, date)
-                    )
-                """
-                )
-
-                # Add last_reset_date field to meta if it doesn't exist
-                c.execute("SELECT value FROM meta WHERE key='last_reset_date'")
-                if not c.fetchone():
-                    self.conn.execute(
-                        """
-                        INSERT OR IGNORE INTO meta (key, value)
-                        VALUES ('last_reset_date', date('now'))
-                        """
-                    )
-
-                # Migrate sessions table to add missing columns
-                c.execute("PRAGMA table_info(sessions)")
-                columns = [row[1] for row in c.fetchall()]
-                if "desktop" not in columns:
-                    logger.info(
-                        "Migrating DB: Adding 'desktop' column to sessions table."
-                    )
-                    self.conn.execute("ALTER TABLE sessions ADD COLUMN desktop TEXT")
-                if "service" not in columns:
-                    logger.info(
-                        "Migrating DB: Adding 'service' column to sessions table."
-                    )
-                    self.conn.execute("ALTER TABLE sessions ADD COLUMN service TEXT")
-        except Exception as e:
-            logger.error(f"DB error during database initialization: {e}")
-
-    def sync_config_to_db(self, config: dict):
-        """
-        Synchronize configuration data to the database.
-
-        Args:
-            config (dict): Konfigurationsdaten
-        """
-        # Defaults abgleichen
-        logger.info("Synchronizing config to database")
-        if self.get_user_settings("default") is None:
-            defaults = config.get("defaults", {})
-            logger.debug("Saving default settings to database")
-            self.set_user_settings("default", defaults)
-        for username, settings in config.get("users", {}).items():
-            if self.get_user_settings(username) is None:
-                if not settings:
-                    settings = config.get("defaults", {})
-                logger.debug(f"Saving settings for new user: {username}")
-                self.set_user_settings(username, settings)
+                session.add(user_settings)
+            
+            session.commit()
 
     async def add_session(
         self,
@@ -290,41 +222,108 @@ class Storage:
         Adds a new session to the database.
 
         Args:
-            session_id (str): Session ID
+            session_id (str): Logind session ID (transient identifier)
             username (str): Username
             uid (int): User ID
             start_time (float): Start time (EPOCH)
-            end_time (float): End time (EPOCH)
+            end_time (float): End time (EPOCH, 0 if still active)
             duration_seconds (float): Session duration in seconds
             desktop (str, optional): Desktop environment
             service (str, optional): Service (e.g. sddm)
         """
-        # If start_time or end_time are logind timestamps, convert them
+        # Convert logind timestamps if needed
         if isinstance(start_time, int) and start_time > 1e12:
             start_time = self.logind_to_epoch(start_time)
         if isinstance(end_time, int) and end_time > 1e12:
             end_time = self.logind_to_epoch(end_time)
-        c = self.conn.cursor()
+        
+        # Determine the date for this session
+        session_date = dt.fromtimestamp(start_time).date()
+        
         logger.info(
-            f"Adding new session for user: {username}, session_id: {session_id}"
+            f"Adding new session for user: {username}, logind_session_id: {session_id}, date: {session_date}"
         )
-        c.execute(
-            """
-            INSERT INTO sessions (session_id, username, uid, start_time, end_time, duration, desktop, service)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                session_id,
-                username,
-                uid,
-                start_time,
-                end_time,
-                duration_seconds,
-                desktop,
-                service,
-            ),
-        )
-        self.conn.commit()
+        
+        def _add():
+            with self.SessionLocal() as db_session:
+                new_session = Session(
+                    logind_session_id=session_id,
+                    username=username,
+                    uid=uid,
+                    date=session_date,
+                    start_time=start_time,
+                    end_time=end_time if end_time != 0 else None,
+                    duration=duration_seconds,
+                    desktop=desktop,
+                    service=service,
+                )
+                db_session.add(new_session)
+                db_session.commit()
+        
+        await asyncio.to_thread(_add)
+
+    def update_session_progress(self, session_id: str, duration_seconds: float):
+        """
+        Periodically update session entry with current duration (while session is active).
+        This is critical for preserving session time across daemon restarts.
+
+        Args:
+            session_id (str): The logind session ID to update
+            duration_seconds (float): Duration in seconds
+        """
+        with self.SessionLocal() as session:
+            # Find active session with this logind_session_id
+            result = session.execute(
+                select(Session)
+                .where(
+                    and_(
+                        Session.logind_session_id == session_id,
+                        or_(Session.end_time == None, Session.end_time == 0)
+                    )
+                )
+            ).scalar_one_or_none()
+            
+            if not result:
+                logger.warning(
+                    f"Cannot update non-existent or closed session: {session_id}"
+                )
+                return
+            
+            # Update duration only if it's larger (prevent race conditions)
+            if result.duration is None or duration_seconds > result.duration:
+                result.duration = duration_seconds
+                session.commit()
+                
+                logger.debug(
+                    f"Updated session progress for logind_session_id: {session_id}, "
+                    f"duration: {duration_seconds/60:.1f} min"
+                )
+
+    def update_session_logout(
+        self, session_id: str, end_time: float, duration_seconds: float
+    ):
+        """
+        Update session entry with logout time and duration.
+
+        Args:
+            session_id (str): Logind session ID to update
+            end_time (float): End time in EPOCH seconds
+            duration_seconds (float): Session duration in seconds
+        """
+        logger.info(f"Updating session logout for logind_session_id: {session_id}")
+        
+        with self.SessionLocal() as session:
+            session.execute(
+                update(Session)
+                .where(
+                    and_(
+                        Session.logind_session_id == session_id,
+                        or_(Session.end_time == None, Session.end_time == 0)
+                    )
+                )
+                .values(end_time=end_time, duration=duration_seconds)
+            )
+            session.commit()
 
     async def add_session_time(
         self, username: str, start_time: datetime, end_time: datetime
@@ -340,7 +339,7 @@ class Storage:
         await self.add_session(
             f"usage_{int(start_time.timestamp())}",
             username,
-            1000,  # uid for testing
+            1000,
             start_time.timestamp(),
             end_time.timestamp(),
             duration_seconds,
@@ -351,26 +350,33 @@ class Storage:
 
         Args:
             username (str): Username
-            session_id (str): Session ID
+            session_id (str): Logind session ID
 
         Returns:
             tuple: Session data or None if not found
         """
-        c = self.conn.cursor()
-        c.execute(
-            """
-            SELECT username, session_id, start_time
-            FROM sessions
-            WHERE username = ? AND session_id = ?
-            AND (end_time IS NULL OR end_time = 0)
-        """,
-            (username, session_id),
-        )
-        session = c.fetchone()
-        if session:
-            # Convert timestamp back to datetime for testing
-            return (session[0], session[1], dt.fromtimestamp(session[2]).isoformat())
-        return None
+        def _get():
+            with self.SessionLocal() as session:
+                result = session.execute(
+                    select(Session)
+                    .where(
+                        and_(
+                            Session.username == username,
+                            Session.logind_session_id == session_id,
+                            or_(Session.end_time == None, Session.end_time == 0)
+                        )
+                    )
+                ).scalar_one_or_none()
+                
+                if result:
+                    return (
+                        result.username,
+                        result.logind_session_id,
+                        dt.fromtimestamp(result.start_time).isoformat(),
+                    )
+                return None
+        
+        return await asyncio.to_thread(_get)
 
     async def get_daily_usage(self, username: str, date: dt.date):
         """Get total usage time for a user on a given date.
@@ -382,43 +388,45 @@ class Storage:
         Returns:
             int: Total usage time in seconds
         """
-        c = self.conn.cursor()
-        day_start = int(dt.combine(date, dt.min.time()).timestamp())
-        day_end = day_start + 86400
-
-        c.execute(
-            """
-            SELECT COALESCE(SUM(duration), 0)
-            FROM sessions
-            WHERE username = ?
-            AND end_time >= ?
-            AND start_time < ?
-        """,
-            (username, day_start, day_end),
-        )
-        return c.fetchone()[0]
+        def _get():
+            with self.SessionLocal() as session:
+                result = session.execute(
+                    select(func.coalesce(func.sum(Session.duration), 0))
+                    .where(
+                        and_(
+                            Session.username == username,
+                            Session.date == date
+                        )
+                    )
+                ).scalar()
+                
+                return int(result) if result else 0
+        
+        return await asyncio.to_thread(_get)
 
     async def end_session(self, username: str, session_id: str, end_time: datetime):
         """End a session for a user.
 
         Args:
             username (str): Username
-            session_id (str): Session ID
+            session_id (str): Logind session ID
             end_time (datetime): End time
         """
-        c = self.conn.cursor()
-        end_timestamp = end_time.timestamp()
-        c.execute(
-            """
-            UPDATE sessions
-            SET end_time = ?
-            WHERE username = ? AND session_id = ?
-        """,
-            (end_timestamp, username, session_id),
-        )
-        self.conn.commit()
-        return None
-        self.conn.commit()
+        def _end():
+            with self.SessionLocal() as session:
+                session.execute(
+                    update(Session)
+                    .where(
+                        and_(
+                            Session.username == username,
+                            Session.logind_session_id == session_id
+                        )
+                    )
+                    .values(end_time=end_time.timestamp())
+                )
+                session.commit()
+        
+        await asyncio.to_thread(_end)
 
     async def get_weekly_usage(self, username: str, date: dt.date):
         """Get total usage time for a user in the week containing the given date.
@@ -430,22 +438,26 @@ class Storage:
         Returns:
             int: Total usage time in seconds
         """
-        c = self.conn.cursor()
-        week_start = int(
-            dt.combine(date - timedelta(days=date.weekday()), dt.min.time()).timestamp()
-        )
-        week_end = week_start + 86400 * 7
-        c.execute(
-            """
-            SELECT SUM(duration)
-            FROM sessions
-            WHERE username = ?
-            AND start_time >= ? AND start_time < ?
-        """,
-            (username, week_start, week_end),
-        )
-        result = c.fetchone()
-        return result[0] or 0
+        def _get():
+            # Calculate week boundaries
+            week_start = date - timedelta(days=date.weekday())
+            week_end = week_start + timedelta(days=7)
+            
+            with self.SessionLocal() as session:
+                result = session.execute(
+                    select(func.sum(Session.duration))
+                    .where(
+                        and_(
+                            Session.username == username,
+                            Session.date >= week_start,
+                            Session.date < week_end
+                        )
+                    )
+                ).scalar()
+                
+                return int(result) if result else 0
+        
+        return await asyncio.to_thread(_get)
 
     async def cleanup_stale_sessions(self, max_age_hours: int):
         """Remove sessions older than the specified age.
@@ -453,16 +465,17 @@ class Storage:
         Args:
             max_age_hours (int): Maximum age in hours to keep sessions
         """
-        c = self.conn.cursor()
-        cutoff_time = dt.now() - timedelta(hours=max_age_hours)
-        c.execute(
-            """
-            DELETE FROM sessions
-            WHERE start_time < ?
-        """,
-            (cutoff_time.timestamp(),),
-        )
-        self.conn.commit()
+        def _cleanup():
+            cutoff_time = dt.now() - timedelta(hours=max_age_hours)
+            cutoff_timestamp = cutoff_time.timestamp()
+            
+            with self.SessionLocal() as session:
+                session.execute(
+                    delete(Session).where(Session.start_time < cutoff_timestamp)
+                )
+                session.commit()
+        
+        await asyncio.to_thread(_cleanup)
 
     async def get_all_active_sessions(self):
         """Get all currently active sessions.
@@ -470,17 +483,31 @@ class Storage:
         Returns:
             list: List of active sessions
         """
-        c = self.conn.cursor()
-        current_time = dt.now().timestamp()
-        c.execute(
-            """
-            SELECT username, session_id, start_time, end_time, duration
-            FROM sessions
-            WHERE end_time > ?
-        """,
-            (current_time,),
-        )
-        return c.fetchall()
+        def _get():
+            current_time = dt.now().timestamp()
+            
+            with self.SessionLocal() as session:
+                results = session.execute(
+                    select(Session).where(
+                        or_(
+                            Session.end_time > current_time,
+                            Session.end_time == None
+                        )
+                    )
+                ).scalars().all()
+                
+                return [
+                    (
+                        r.username,
+                        r.logind_session_id,
+                        r.start_time,
+                        r.end_time,
+                        r.duration,
+                    )
+                    for r in results
+                ]
+        
+        return await asyncio.to_thread(_get)
 
     async def get_usage_in_date_range(
         self, username: str, start_date: datetime, end_date: datetime
@@ -495,22 +522,22 @@ class Storage:
         Returns:
             int: Total usage time in seconds
         """
-        c = self.conn.cursor()
-        c.execute(
-            """
-            SELECT SUM(duration)
-            FROM sessions
-            WHERE username = ?
-            AND start_time >= ? AND start_time < ?
-        """,
-            (
-                username,
-                start_date.timestamp(),
-                end_date.timestamp(),
-            ),
-        )
-        result = c.fetchone()
-        return result[0] or 0
+        def _get():
+            with self.SessionLocal() as session:
+                result = session.execute(
+                    select(func.sum(Session.duration))
+                    .where(
+                        and_(
+                            Session.username == username,
+                            Session.start_time >= start_date.timestamp(),
+                            Session.start_time < end_date.timestamp()
+                        )
+                    )
+                ).scalar()
+                
+                return int(result) if result else 0
+        
+        return await asyncio.to_thread(_get)
 
     def get_sessions_for_user(
         self, username: str, since: Optional[float] = None
@@ -523,20 +550,35 @@ class Storage:
             since (float, optional): Start time (Unix timestamp)
 
         Returns:
-            list: List of sessions
+            list: List of sessions as tuples
         """
-        c = self.conn.cursor()
         logger.debug(f"Fetching sessions for user: {username}, since: {since}")
-        if since:
-            c.execute(
-                "SELECT * FROM sessions WHERE username=? AND start_time>=?",
-                (username, since),
-            )
-        else:
-            c.execute("SELECT * FROM sessions WHERE username=?", (username,))
-        sessions = c.fetchall()
-        logger.debug(f"Found {len(sessions)} sessions for user: {username}")
-        return sessions
+        
+        with self.SessionLocal() as session:
+            query = select(Session).where(Session.username == username)
+            
+            if since:
+                query = query.where(Session.start_time >= since)
+            
+            results = session.execute(query).scalars().all()
+            
+            # Convert to tuple format for backwards compatibility
+            sessions = [
+                (
+                    r.logind_session_id,
+                    r.username,
+                    r.uid,
+                    r.start_time,
+                    r.end_time if r.end_time else 0,
+                    r.duration if r.duration else 0,
+                    r.desktop,
+                    r.service,
+                )
+                for r in results
+            ]
+            
+            logger.debug(f"Found {len(sessions)} sessions for user: {username}")
+            return sessions
 
     def get_all_usernames(self) -> list:
         """
@@ -545,80 +587,196 @@ class Storage:
         Returns:
             list: List of usernames
         """
-        c = self.conn.cursor()
         logger.debug("Fetching all usernames except 'default'")
-        c.execute("SELECT username FROM user_settings WHERE username != 'default'")
-        usernames = [row[0] for row in c.fetchall()]
-        logger.debug(f"Found usernames: {usernames}")
-        return usernames
+        
+        with self.SessionLocal() as session:
+            results = session.execute(
+                select(UserSettings.username).where(UserSettings.username != "default")
+            ).scalars().all()
+            
+            usernames = list(results)
+            logger.debug(f"Found usernames: {usernames}")
+            return usernames
+
+    def get_open_sessions(self) -> list:
+        """
+        Get all currently open sessions from the database.
+        
+        Returns:
+            list: List of tuples (logind_session_id, username, uid, start_time, duration, desktop, service)
+        """
+        with self.SessionLocal() as session:
+            results = session.execute(
+                select(Session)
+                .where(or_(Session.end_time == None, Session.end_time == 0))
+            ).scalars().all()
+            
+            return [
+                (
+                    r.logind_session_id,
+                    r.username,
+                    r.uid,
+                    r.start_time,
+                    r.duration if r.duration else 0,
+                    r.desktop,
+                    r.service,
+                )
+                for r in results
+            ]
+
+    def get_sessions_count_since(self, timestamp: float) -> int:
+        """
+        Get count of sessions since a given timestamp.
+        
+        Args:
+            timestamp (float): Unix timestamp
+            
+        Returns:
+            int: Count of sessions
+        """
+        with self.SessionLocal() as session:
+            result = session.execute(
+                select(func.count(Session.id))
+                .where(Session.start_time >= timestamp)
+            ).scalar()
+            
+            return result if result else 0
 
     def delete_sessions_since(self, since: float):
         """
         Delete all sessions from the database since the given timestamp.
 
         Args:
-            since (float): Startzeitpunkt (Unix-Timestamp)
+            since (float): Start timestamp (Unix timestamp)
         """
-        c = self.conn.cursor()
         logger.info(f"Deleting sessions since timestamp: {since}")
-        c.execute("DELETE FROM sessions WHERE start_time >= ?", (since,))
-        self.conn.commit()
+        
+        with self.SessionLocal() as session:
+            session.execute(
+                delete(Session).where(Session.start_time >= since)
+            )
+            session.commit()
+
+    def get_open_sessions(self) -> list:
+        """
+        Get all open (active) sessions from the database.
+        
+        Returns:
+            list: List of open sessions as tuples (session_id, username, uid, start_time, duration, desktop, service)
+        """
+        with self.SessionLocal() as session:
+            results = session.execute(
+                select(Session)
+                .where(or_(Session.end_time == None, Session.end_time == 0))
+            ).scalars().all()
+            
+            return [
+                (
+                    r.logind_session_id,
+                    r.username,
+                    r.uid,
+                    r.start_time,
+                    r.duration if r.duration else 0,
+                    r.desktop,
+                    r.service,
+                )
+                for r in results
+            ]
+
+    def get_sessions_count_since(self, since: float) -> int:
+        """
+        Get count of sessions since the given timestamp.
+        
+        Args:
+            since (float): Start timestamp (Unix timestamp)
+            
+        Returns:
+            int: Number of sessions
+        """
+        with self.SessionLocal() as session:
+            result = session.execute(
+                select(func.count(Session.id))
+                .where(Session.start_time >= since)
+            ).scalar()
+            
+            return int(result) if result else 0
 
     def get_last_reset_timestamp(self) -> Optional[float]:
         """
         Retrieve the last daily reset timestamp from the database.
+        
         Returns:
             float | None: EPOCH timestamp of last reset or None
         """
-        c = self.conn.cursor()
-        c.execute("SELECT value FROM meta WHERE key='last_reset'")
-        row = c.fetchone()
-        if row:
-            try:
-                return float(row[0])
-            except Exception:
-                return None
-        return None
+        with self.SessionLocal() as session:
+            result = session.execute(
+                select(Meta).where(Meta.key == "last_reset")
+            ).scalar_one_or_none()
+            
+            if result:
+                try:
+                    return float(result.value)
+                except ValueError:
+                    return None
+            return None
 
     def set_last_reset_timestamp(self, ts: float):
         """
         Store the last daily reset timestamp in the database.
+        
         Args:
             ts (float): EPOCH timestamp
         """
-        c = self.conn.cursor()
-        c.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            ("last_reset", str(ts)),
-        )
-        self.conn.commit()
+        with self.SessionLocal() as session:
+            result = session.execute(
+                select(Meta).where(Meta.key == "last_reset")
+            ).scalar_one_or_none()
+            
+            if result:
+                result.value = str(ts)
+            else:
+                meta = Meta(key="last_reset", value=str(ts))
+                session.add(meta)
+            
+            session.commit()
 
     def get_last_reset_date(self) -> str:
         """
         Retrieve the last daily reset date from the database.
+        
         Returns:
             str: Date in YYYY-MM-DD format
         """
-        c = self.conn.cursor()
-        c.execute("SELECT value FROM meta WHERE key='last_reset_date'")
-        row = c.fetchone()
-        if row:
-            return row[0]
-        # Default to today if not found
-        return dt.today().strftime("%Y-%m-%d")
+        with self.SessionLocal() as session:
+            result = session.execute(
+                select(Meta).where(Meta.key == "last_reset_date")
+            ).scalar_one_or_none()
+            
+            if result:
+                return result.value
+            
+            # Default to today if not found
+            return dt.today().strftime("%Y-%m-%d")
 
     def set_last_reset_date(self, date_str: str):
         """
         Store the last daily reset date in the database.
+        
         Args:
             date_str (str): Date in YYYY-MM-DD format
         """
-        c = self.conn.cursor()
-        c.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            ("last_reset_date", date_str),
-        )
-        self.conn.commit()
+        with self.SessionLocal() as session:
+            result = session.execute(
+                select(Meta).where(Meta.key == "last_reset_date")
+            ).scalar_one_or_none()
+            
+            if result:
+                result.value = date_str
+            else:
+                meta = Meta(key="last_reset_date", value=date_str)
+                session.add(meta)
+            
+            session.commit()
 
     def summarize_user_sessions(self, username: str, date: str = None):
         """
@@ -632,110 +790,67 @@ class Storage:
         Returns:
             dict: Summary of session data
         """
-        import datetime
-
         if not date:
-            # Get most recent session date for user
-            c = self.conn.cursor()
-            c.execute(
-                """
-                SELECT date(start_time, 'unixepoch', 'localtime') as session_date
-                FROM sessions
-                WHERE username = ?
-                ORDER BY start_time DESC LIMIT 1
-                """,
-                (username,),
-            )
-            result = c.fetchone()
-            if result:
-                date = result[0]
-            else:
-                # No sessions found, use today's date
-                date = datetime.date.today().strftime("%Y-%m-%d")
-
-        # Get start/end of day in local time
-        date = dt.today().strftime("%Y-%m-%d")
-
-        # Convert date string to bounds
+            date = dt.today().strftime("%Y-%m-%d")
+        
+        # Convert date string to date object
         date_obj = dt.strptime(date, "%Y-%m-%d").date()
-        start_of_day = dt.combine(date_obj, dt.time.min)
-        end_of_day = dt.combine(date_obj, dt.time.max)
-
-        # Convert to epoch timestamps
-        start_ts = start_of_day.timestamp()
-        end_ts = end_of_day.timestamp()
-
-        # Query sessions for this user on this day
-        c = self.conn.cursor()
-        c.execute(
-            """
-            SELECT
-                start_time,
-                end_time,
-                duration,
-                session_id
-            FROM sessions
-            WHERE
-                username = ? AND
-                (
-                    (start_time >= ? AND start_time <= ?) OR
-                    (end_time >= ? AND end_time <= ?) OR
-                    (start_time < ? AND (end_time > ? OR end_time = 0))
+        
+        with self.SessionLocal() as session:
+            # Query sessions for this user on this day
+            results = session.execute(
+                select(Session)
+                .where(
+                    and_(
+                        Session.username == username,
+                        Session.date == date_obj
+                    )
                 )
-            ORDER BY start_time
-            """,
-            (username, start_ts, end_ts, start_ts, end_ts, start_ts, start_ts),
-        )
-        sessions = c.fetchall()
-
-        # Calculate summary statistics
-        total_screen_time = 0
-        login_count = len(sessions)
-        first_login = None
-        last_logout = None
-
-        for start_time, end_time, _, session_id in sessions:
-            # For sessions still in progress, use current time as end
-            if not end_time or end_time == 0:
-                end_time = time.time()
-
-            # Only count time that falls within this day
-            adjusted_start = max(start_time, start_ts)
-            adjusted_end = min(end_time, end_ts)
-
-            # Add the duration that falls within this day
-            if adjusted_end > adjusted_start:
-                total_screen_time += adjusted_end - adjusted_start
-
-            # Track first login and last logout within this day
-            if not first_login or start_time < first_login:
-                first_login = start_time
-
-            if not last_logout or (end_time and end_time > last_logout):
-                last_logout = end_time
-
-        # Create summary object
-        summary = {
-            "username": username,
-            "date": date,
-            "total_screen_time": int(total_screen_time),
-            "login_count": login_count,
-            "first_login": (
-                datetime.datetime.fromtimestamp(first_login).isoformat()
-                if first_login
-                else None
-            ),
-            "last_logout": (
-                datetime.datetime.fromtimestamp(last_logout).isoformat()
-                if last_logout and last_logout != 0
-                else None
-            ),
-            "quota_exceeded": False,  # Will be set by calling function if needed
-            "bonus_time_used": 0,  # Will be set by calling function if needed
-            "created_at": datetime.datetime.now().isoformat(),
-        }
-
-        return summary
+                .order_by(Session.start_time)
+            ).scalars().all()
+            
+            # Calculate summary statistics
+            total_screen_time = 0
+            login_count = len(results)
+            first_login = None
+            last_logout = None
+            
+            for sess in results:
+                # Add duration if available
+                if sess.duration:
+                    total_screen_time += sess.duration
+                
+                # Track first login
+                if first_login is None or sess.start_time < first_login:
+                    first_login = sess.start_time
+                
+                # Track last logout
+                if sess.end_time:
+                    if last_logout is None or sess.end_time > last_logout:
+                        last_logout = sess.end_time
+            
+            # Create summary object
+            summary = {
+                "username": username,
+                "date": date,
+                "total_screen_time": int(total_screen_time),
+                "login_count": login_count,
+                "first_login": (
+                    dt.fromtimestamp(first_login).isoformat()
+                    if first_login
+                    else None
+                ),
+                "last_logout": (
+                    dt.fromtimestamp(last_logout).isoformat()
+                    if last_logout and last_logout != 0
+                    else None
+                ),
+                "quota_exceeded": False,
+                "bonus_time_used": 0,
+                "created_at": dt.now().isoformat(),
+            }
+            
+            return summary
 
     def save_history_entry(self, summary: dict):
         """
@@ -744,30 +859,46 @@ class Storage:
         Args:
             summary (dict): Session summary data
         """
-        c = self.conn.cursor()
-        c.execute(
-            """
-            INSERT OR REPLACE INTO history
-            (username, date, total_screen_time, login_count, first_login, last_logout,
-             quota_exceeded, bonus_time_used, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                summary["username"],
-                summary["date"],
-                summary["total_screen_time"],
-                summary["login_count"],
-                summary["first_login"],
-                summary["last_logout"],
-                1 if summary["quota_exceeded"] else 0,
-                summary["bonus_time_used"],
-                summary["created_at"],
-            ),
-        )
-        self.conn.commit()
-        logger.info(
-            f"Saved history entry for {summary['username']} on {summary['date']}"
-        )
+        with self.SessionLocal() as session:
+            # Check if entry already exists
+            result = session.execute(
+                select(History)
+                .where(
+                    and_(
+                        History.username == summary["username"],
+                        History.date == summary["date"]
+                    )
+                )
+            ).scalar_one_or_none()
+            
+            if result:
+                # Update existing
+                result.total_screen_time = summary["total_screen_time"]
+                result.login_count = summary["login_count"]
+                result.first_login = summary["first_login"]
+                result.last_logout = summary["last_logout"]
+                result.quota_exceeded = 1 if summary["quota_exceeded"] else 0
+                result.bonus_time_used = summary["bonus_time_used"]
+                result.created_at = summary["created_at"]
+            else:
+                # Create new
+                history = History(
+                    username=summary["username"],
+                    date=summary["date"],
+                    total_screen_time=summary["total_screen_time"],
+                    login_count=summary["login_count"],
+                    first_login=summary["first_login"],
+                    last_logout=summary["last_logout"],
+                    quota_exceeded=1 if summary["quota_exceeded"] else 0,
+                    bonus_time_used=summary["bonus_time_used"],
+                    created_at=summary["created_at"],
+                )
+                session.add(history)
+            
+            session.commit()
+            logger.info(
+                f"Saved history entry for {summary['username']} on {summary['date']}"
+            )
 
     def clean_old_sessions(self, username: str, before_date: str = None):
         """
@@ -778,40 +909,25 @@ class Storage:
             before_date (str, optional): Remove sessions before this date (YYYY-MM-DD)
                                          If not provided, removes all sessions
         """
-        c = self.conn.cursor()
-
-        if before_date:
-            # Convert date to timestamp
-            date_obj = datetime.datetime.strptime(before_date, "%Y-%m-%d").date()
-            cutoff_ts = datetime.datetime.combine(
-                date_obj, datetime.time.min
-            ).timestamp()
-
-            # Get count before deletion
-            c.execute(
-                "SELECT COUNT(*) FROM sessions WHERE username = ? AND end_time < ?",
-                (username, cutoff_ts),
-            )
-            count = c.fetchone()[0]
-
-            # Delete sessions
-            c.execute(
-                "DELETE FROM sessions WHERE username = ? AND end_time < ?",
-                (username, cutoff_ts),
-            )
-            self.conn.commit()
-            logger.info(
-                f"Removed {count} old sessions for {username} before {before_date}"
-            )
-        else:
-            # Get count before deletion
-            c.execute("SELECT COUNT(*) FROM sessions WHERE username = ?", (username,))
-            count = c.fetchone()[0]
-
-            # Delete all sessions for this user
-            c.execute("DELETE FROM sessions WHERE username = ?", (username,))
-            self.conn.commit()
-            logger.info(f"Removed all {count} sessions for {username}")
+        with self.SessionLocal() as session:
+            if before_date:
+                date_obj = dt.strptime(before_date, "%Y-%m-%d").date()
+                session.execute(
+                    delete(Session)
+                    .where(
+                        and_(
+                            Session.username == username,
+                            Session.date < date_obj
+                        )
+                    )
+                )
+            else:
+                session.execute(
+                    delete(Session).where(Session.username == username)
+                )
+            
+            session.commit()
+            logger.info(f"Cleaned old sessions for {username}")
 
     def get_history(self, username: str, start_date: str = None, end_date: str = None):
         """
@@ -823,37 +939,41 @@ class Storage:
             end_date (str, optional): End date in YYYY-MM-DD format
 
         Returns:
-            list: List of history entries
+            list: List of history entries as dictionaries
         """
-        c = self.conn.cursor()
-        params = [username]
-        query = "SELECT * FROM history WHERE username = ?"
-
-        if start_date:
-            query += " AND date >= ?"
-            params.append(start_date)
-
-        if end_date:
-            query += " AND date <= ?"
-            params.append(end_date)
-
-        query += " ORDER BY date DESC"
-
-        c.execute(query, params)
-        columns = [description[0] for description in c.description]
-        history_entries = []
-
-        for row in c.fetchall():
-            history_entries.append(dict(zip(columns, row)))
-
-        return history_entries
+        with self.SessionLocal() as session:
+            query = select(History).where(History.username == username)
+            
+            if start_date:
+                query = query.where(History.date >= start_date)
+            
+            if end_date:
+                query = query.where(History.date <= end_date)
+            
+            query = query.order_by(History.date.desc())
+            
+            results = session.execute(query).scalars().all()
+            
+            # Convert to dictionaries
+            history_entries = []
+            for r in results:
+                history_entries.append({
+                    "username": r.username,
+                    "date": r.date,
+                    "total_screen_time": r.total_screen_time,
+                    "login_count": r.login_count,
+                    "first_login": r.first_login,
+                    "last_logout": r.last_logout,
+                    "quota_exceeded": bool(r.quota_exceeded),
+                    "bonus_time_used": r.bonus_time_used,
+                    "created_at": r.created_at,
+                })
+            
+            return history_entries
 
     def close(self):
         """
         Close the database connection.
         """
         logger.info("Closing SQLite database connection")
-        self.conn.close()
-
-
-# SQLite storage
+        self.engine.dispose()

@@ -170,17 +170,26 @@ class SessionTracker:
             logger.debug(f"User {username} has unlimited time")
             return float("inf")
 
-        # Simplified used time calculation
+        # Calculate used time from active sessions (accounting for locked periods)
         async with self.session_lock:
             active_duration_seconds = 0
             now = time.time()
-            for session in self.active_sessions.values():
+            for session_id, session in self.active_sessions.items():
                 if (
                     session["username"] == username
                     and session.get("desktop")
                     and session.get("service") != "systemd-user"
                 ):
-                    active_duration_seconds += now - session["start_time"]
+                    # Calculate raw duration
+                    raw_duration = now - session["start_time"]
+                    # Subtract locked time
+                    locked_periods = self.session_locks.get(session_id, [])
+                    locked_seconds = sum(
+                        (lock_end or now) - lock_start
+                        for lock_start, lock_end in locked_periods
+                    )
+                    effective_duration = max(0.0, raw_duration - locked_seconds)
+                    active_duration_seconds += effective_duration
 
         reset_time = self.policy.data.get("reset_time", "03:00")
         now_dt = datetime.datetime.now(datetime.timezone.utc).astimezone()
@@ -198,13 +207,14 @@ class SessionTracker:
         )
 
         active_session_ids = set(self.active_sessions.keys())
+        # Session columns: 0=id, 1=session_id, 2=username, 3=uid, 4=start_time, 5=end_time, 6=duration, 7=desktop, 8=service
         filtered_sessions = [
             s
             for s in db_sessions
             if s[6] > 30  # Has meaningful duration
             and s[8] != "systemd-user"  # Not a systemd-user session
             and s[7]  # Has a desktop value
-            and s[0] not in active_session_ids  # Not currently active
+            and s[1] not in active_session_ids  # Not currently active (s[1] is session_id, not s[0] which is db id)
         ]
         db_duration_seconds = sum(s[6] for s in filtered_sessions)
 
@@ -379,13 +389,9 @@ class SessionTracker:
         try:
             # Force an update of all active sessions in the database before proceeding
             # Get all open sessions from database
-            c = self.storage.conn.cursor()
-            c.execute(
-                "SELECT session_id, username, start_time, duration FROM sessions WHERE end_time IS NULL OR end_time = 0"
-            )
-            open_sessions = c.fetchall()
+            open_sessions = self.storage.get_open_sessions()
             for session_row in open_sessions:
-                session_id, username, start_time, duration = session_row
+                session_id, username, _, start_time, duration, _, _ = session_row
                 logger.info(
                     f"Found open session {session_id} for {username} with duration {duration/60:.1f} min"
                 )
@@ -393,31 +399,21 @@ class SessionTracker:
             logger.error(f"Error updating open sessions before restore: {e}")
 
         # Now get the latest data from the database
-        c = self.storage.conn.cursor()
-        c.execute(
-            "SELECT session_id, username, uid, start_time, duration, desktop, service FROM sessions WHERE end_time IS NULL OR end_time = 0"
-        )
-        rows = c.fetchall()
+        rows = self.storage.get_open_sessions()
         now = time.time()
 
         # First, collect all unique sessions by session_id
         for row in rows:
-            # Safely handle both old and new DB schema versions by checking column count
-            if len(row) >= 7:
-                (
-                    session_id,
-                    username,
-                    uid,
-                    old_start_time,
-                    duration,
-                    desktop,
-                    service,
-                ) = row
-            else:
-                # Handle old schema that doesn't have desktop and service columns
-                session_id, username, uid, old_start_time, duration = row
-                desktop = ""
-                service = ""
+            # Unpack the row
+            (
+                session_id,
+                username,
+                uid,
+                old_start_time,
+                duration,
+                desktop,
+                service,
+            ) = row
 
             # Only process each unique session_id once
             if session_id in unique_sessions:
@@ -430,8 +426,8 @@ class SessionTracker:
                 "old_start_time": old_start_time,
                 "duration": duration
                 or 0.0,  # Ensure we have a valid duration, default to 0
-                "desktop": desktop,
-                "service": service,
+                "desktop": desktop or "",
+                "service": service or "",
             }
 
         # Now process the unique sessions
@@ -932,15 +928,11 @@ class SessionTracker:
             )
 
             # Check if there are any sessions from today
-            c = self.storage.conn.cursor()
             today_start = datetime.datetime.combine(
                 datetime.date.today(), datetime.time.min
             ).timestamp()
 
-            c.execute(
-                "SELECT COUNT(*) FROM sessions WHERE start_time >= ?", (today_start,)
-            )
-            today_sessions_count = c.fetchone()[0]
+            today_sessions_count = self.storage.get_sessions_count_since(today_start)
 
             if today_sessions_count == 0:
                 logger.info("No sessions from today found. Performing daily reset.")
