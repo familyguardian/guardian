@@ -11,9 +11,9 @@ from datetime import datetime as dt
 from datetime import timedelta
 from typing import Optional
 
-from sqlalchemy import and_, create_engine, delete, func, or_, select, update
+from sqlalchemy import and_, create_engine, delete, func, or_, select, text, update
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool
 
 from guardian_daemon.logging import get_logger
 from guardian_daemon.models import Base, History, Meta, Session, UserSettings
@@ -67,12 +67,13 @@ class Storage:
             os.makedirs(parent_dir)
 
         # Create SQLAlchemy engine with proper SQLite configuration
-        # StaticPool: maintains a single connection for all threads (safe for SQLite)
-        # This prevents "database is locked" errors and ensures thread-safety
+        # NullPool: creates a new connection for each thread (required for true concurrency)
+        # StaticPool works for single-threaded access, but NullPool is safer for asyncio.to_thread()
+        # This prevents "bad parameter or other API misuse" errors in concurrent scenarios
         self.engine = create_engine(
             f"sqlite:///{self.db_path}",
             echo=False,
-            poolclass=StaticPool,
+            poolclass=NullPool,
             connect_args={
                 "check_same_thread": False,
                 "timeout": 30,  # 30 second timeout for lock acquisition
@@ -96,8 +97,8 @@ class Storage:
 
             # Set SQLite pragmas
             with self.engine.connect() as conn:
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute(text("PRAGMA journal_mode=WAL"))
+                conn.execute(text("PRAGMA foreign_keys=ON"))
                 conn.commit()
 
             # Initialize default meta values
@@ -670,54 +671,6 @@ class Storage:
         with self.SessionLocal() as session:
             session.execute(delete(Session).where(Session.start_time >= since))
             session.commit()
-
-    def get_open_sessions(self) -> list:
-        """
-        Get all open (active) sessions from the database.
-
-        Returns:
-            list: List of open sessions as tuples (session_id, username, uid, start_time, duration, desktop, service)
-        """
-        with self.SessionLocal() as session:
-            results = (
-                session.execute(
-                    select(Session).where(
-                        or_(Session.end_time == None, Session.end_time == 0)
-                    )
-                )
-                .scalars()
-                .all()
-            )
-
-            return [
-                (
-                    r.logind_session_id,
-                    r.username,
-                    r.uid,
-                    r.start_time,
-                    r.duration if r.duration else 0,
-                    r.desktop,
-                    r.service,
-                )
-                for r in results
-            ]
-
-    def get_sessions_count_since(self, since: float) -> int:
-        """
-        Get count of sessions since the given timestamp.
-
-        Args:
-            since (float): Start timestamp (Unix timestamp)
-
-        Returns:
-            int: Number of sessions
-        """
-        with self.SessionLocal() as session:
-            result = session.execute(
-                select(func.count(Session.id)).where(Session.start_time >= since)
-            ).scalar()
-
-            return int(result) if result else 0
 
     def get_last_reset_timestamp(self) -> Optional[float]:
         """

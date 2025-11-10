@@ -135,8 +135,8 @@ async def test_handle_connection_enforces_authentication(ipc_server):
     reader = AsyncMock()
     writer = AsyncMock()
 
-    # Non-root, non-admin group user
-    writer.get_extra_info.return_value = (1000, 1000, 0)
+    # Non-root, non-admin group user - get_extra_info is NOT async, use Mock
+    writer.get_extra_info = Mock(return_value=(1000, 1000, 0))
 
     await ipc_server.handle_connection(reader, writer)
 

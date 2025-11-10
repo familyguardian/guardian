@@ -48,4 +48,9 @@ addopts = "-v --tb=short --cov=guardian_daemon --cov-report=html"
 testpaths = ["tests"]
 pythonpath = ["."]
 
+[tool.ruff]
+# SQLAlchemy requires '== None' for proper SQL generation (translates to IS NULL)
+# Using 'is None' in or_() clauses causes query failures
+lint.ignore = ["E711"]
+
 

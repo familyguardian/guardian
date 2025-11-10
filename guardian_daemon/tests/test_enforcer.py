@@ -22,15 +22,11 @@ def enforcer(test_config, mock_dbus, mocker):
     mock_session_tracker = mocker.MagicMock(spec=SessionTracker)
     mock_session_tracker.check_quota = AsyncMock(return_value=True)
     mock_session_tracker.check_curfew = AsyncMock(return_value=True)
-    mock_user_manager = mocker.MagicMock()
 
     # Mock policy methods
     mock_policy.get_grace_time = mocker.MagicMock(
         return_value=5
     )  # 5 minutes grace period
-
-    # Patch UserManager constructor
-    mocker.patch("guardian_daemon.enforcer.UserManager", return_value=mock_user_manager)
 
     enforcer = Enforcer(mock_policy, mock_session_tracker)
     return enforcer, mock_session_tracker, mock_policy
@@ -55,9 +51,9 @@ async def test_enforce_user_grace_period(enforcer, mocker):
     handle_grace_spy = mocker.spy(enforcer_instance, "handle_grace_period")
 
     username = "testuser"
-    # Mock getting remaining time
-    mock_tracker.get_remaining_time.return_value = 0
-    mock_tracker.get_total_time.return_value = 3600  # 1 hour total
+    # Mock getting remaining time (values in minutes)
+    mock_tracker.get_remaining_time.return_value = 0.0
+    mock_tracker.get_total_time.return_value = 60.0  # 1 hour total (60 minutes)
     mock_policy.get_grace_time.return_value = 5
 
     # Start enforcing
@@ -81,9 +77,9 @@ async def test_enforce_user_with_notifications(enforcer):
     enforcer_instance, mock_tracker, _ = enforcer
 
     username = "testuser"
-    # Mock getting remaining time
-    mock_tracker.get_remaining_time.return_value = 300  # 5 minutes remaining
-    mock_tracker.get_total_time.return_value = 3600  # 1 hour total
+    # Mock getting remaining time (values in minutes)
+    mock_tracker.get_remaining_time.return_value = 20.0  # 20 minutes remaining
+    mock_tracker.get_total_time.return_value = 60.0  # 1 hour total (60 minutes)
 
     # Test notification flow
     await enforcer_instance.enforce_user(username)
@@ -97,8 +93,8 @@ async def test_notification_cooldown(enforcer):
     enforcer_instance, mock_tracker, _ = enforcer
 
     username = "testuser"
-    mock_tracker.get_remaining_time.return_value = 300  # 5 minutes remaining
-    mock_tracker.get_total_time.return_value = 3600  # 1 hour total
+    mock_tracker.get_remaining_time.return_value = 5.0  # 5 minutes remaining
+    mock_tracker.get_total_time.return_value = 60.0  # 1 hour total (60 minutes)
 
     # First notification
     await enforcer_instance.enforce_user(username)
