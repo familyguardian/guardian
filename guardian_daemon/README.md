@@ -58,38 +58,62 @@ for children on Linux devices. It runs as a systemd service with root privileges
   - Measures usage time per child and saves it in the database.
   - Checks quota/curfew according to the policy.
 
-- **PamManager (`pam_manager.py`)**
-  - Writes and removes login time rules in `/etc/security/time.conf` according to the policy.
-  - Backup of the original file is created automatically.
+- **UserManager (`user_manager.py`)**
+  - Manages PAM time-based access restrictions via `/etc/security/time.conf`.
+  - Ensures the `kids` group exists and users are properly assigned.
+  - Sets up user-specific systemd services for the guardian-agent.
+  - Configures D-Bus policies for user agents.
+  - Ensures `pam_time.so` module is active in PAM configuration.
 
-- **Integration (`main.py`)**
+- **Integration (`__main__.py`)**
   - Initializes all components and starts the daemon.
   - Policy and storage are passed centrally.
   - PAM rules are set at startup.
   - Session tracking runs asynchronously.
 
-## Remaining Steps & TODOs
+## Phase 0 Status (Local Device) — MOSTLY COMPLETE
 
-- **Enforcement Logic**
-  - Define notification frequency and thresholds (guardian_agent).
-  - Implement session termination more specifically if necessary (e.g. only graphical sessions, game sessions).
-  - Develop concept for game sessions and their enforcement/notification.
+Phase 0 components are mostly implemented and functional:
 
-- **Network Client**
-  - Communication with central Guardian Hub (API/WebSocket).
-  - Synchronization of policies and usage data.
-  - File: `net_client.py`
+✅ **Completed:**
+- Daemon (systemd service with root privileges)
+- Policy loader with YAML configuration
+- PAM time window enforcement via `/etc/security/time.conf`
+- logind session watcher via D-Bus
+- Systemd timer management (curfew/daily reset)
+- guardianctl CLI with dynamic command discovery
+- IPC server for admin commands
+- SQLAlchemy-based storage layer
+- Grace period and notification system
+- User and group management
 
-- **Admin IPC**
-  - Implement a local socket for admin commands (bonus time, policy reload, etc.).
-  - File: `ipc.py`
+⚠️ **Partially Implemented:**
+- guardian-agent (notifications work but needs more testing)
+- Session history tracking (basic implementation exists)
 
-- **Error and Exception Handling**
-  - Logging with as much detail as possible, possibly message to the hub.
+🚧 **Not Yet Started (Future Phases):**
+- Network client for hub communication (`net_client.py` is stub)
+- guardian-hub server (Phase 1)
+- Multi-device coordination (Phase 2)
+- App allowlists/blocklists (Phase 3)
+- Kiosk mode for game sessions (Phase 3)
 
-- **Tests and Mocking**
-  - Write unit and integration tests for all core modules.
-  - Mock DBus and systemd for local tests.
+## Remaining TODOs for Phase 0
+
+- **Testing**
+  - Expand unit test coverage for all modules
+  - Create integration tests with mocked D-Bus and systemd
+  - Test edge cases (system hibernation, clock changes, etc.)
+
+- **Documentation**
+  - Add more examples to configuration file
+  - Document common troubleshooting scenarios
+  - Create architecture diagrams
+
+- **Robustness**
+  - Improve error handling for D-Bus connection failures
+  - Add retry logic for transient failures
+  - Better handling of malformed configuration files
 
 ## Roadmap / Phases
 
@@ -137,11 +161,7 @@ for children on Linux devices. It runs as a systemd service with root privileges
 - **Fault Tolerance:** Never hard lock out users due to errors in policy or database, but issue warnings and continue permissively.
 - **Documentation:** Keep the README and docstrings up to date to facilitate development for further contributors.
 
-- **Open Questions:**
-  - How are notifications technically triggered (guardian_agent)? DBus, socket, command?
-  - How are systemd timers caught up if the computer is not running at the reset time?
-  - How are game sessions and their enforcement/notification technically implemented?
-  - How flexible and dynamic should PAM rules be adjusted?
+## Design Principles
 
 - **Explicit User Monitoring:**
   - Only users listed under `users:` in the configuration are monitored by the daemon and receive quota/curfew rules.
@@ -154,6 +174,13 @@ for children on Linux devices. It runs as a systemd service with root privileges
 - **Security:** Ensure secure permissions for IPC and database access. Backup and restore of PAM configurations.
 - **Fault Tolerance:** Never hard lock out users due to errors in policy or database, but issue warnings and continue permissively.
 - **Documentation:** Keep the README and docstrings up to date to facilitate development for further contributors.
+
+## Technical Implementation Notes
+
+- **Notifications:** Triggered via D-Bus to guardian-agent user service, which uses `notify-send`
+- **Timer Catch-Up:** Systemd timers with `Persistent=true` automatically catch up missed runs on next boot
+- **Game Sessions:** Planned for Phase 3 with custom systemd units per child
+- **PAM Rules:** Dynamic generation based on policy, safely preserved non-Guardian rules
 
 ---
 

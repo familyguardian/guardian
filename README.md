@@ -118,8 +118,11 @@ pre-installed Python, Node.js, Git, and UV as package manager and script runner.
 - User-level service, displays notifications (DBus/notify-send).
 - Not security-critical, just a "friendly reminder".
 
-### guardian-hub (Central Server)
+### guardian-hub (Central Server) — NOT YET IMPLEMENTED
 
+> **Note:** The hub is currently not implemented. Only stub files exist for future development.
+
+Planned features:
 - **Source of truth** for policies & daily accounts.
 - API (HTTP/JSON via FastAPI) + realtime push (WebSocket).
 - Database (Postgres for production; SQLite MVP).
@@ -250,24 +253,29 @@ users:
 ```text
 guardian/
  ├─ guardian_daemon/     # Main daemon (systemd service)
- │   ├─ main.py
- │   ├─ policy.py        # Policy models (pydantic)
- │   ├─ sessions.py      # logind watcher
+ │   ├─ __main__.py      # Entry point
+ │   ├─ config.py        # Configuration management
+ │   ├─ policy.py        # Policy loading and validation
+ │   ├─ sessions.py      # logind watcher & session tracking
  │   ├─ enforcer.py      # Quota/curfew enforcement
- │   ├─ pam_manager.py   # PAM time.conf blocks
- │   ├─ systemd_manager.py
- │   ├─ net_client.py    # API/WebSocket hub
- │   ├─ storage.py       # SQLite
- │   └─ ipc.py           # Admin socket
+ │   ├─ user_manager.py  # PAM time.conf & user management
+ │   ├─ systemd_manager.py  # Systemd timer management
+ │   ├─ net_client.py    # API/WebSocket hub (stub)
+ │   ├─ storage.py       # SQLAlchemy storage layer
+ │   ├─ models.py        # Database models
+ │   └─ ipc.py           # Admin socket for CLI
  ├─ guardianctl/         # CLI tool
- │   └─ cli.py
+ │   └─ cli.py           # Dynamic command registration
  ├─ guardian_agent/      # User notifications (optional)
- ├─ guardian_hub/        # Central server (FastAPI, DB, Websocket)
- │   ├─ api.py
- │   ├─ models.py
- │   ├─ db.py
- │   └─ webui/           # React/Next.js frontend
+ │   ├─ __main__.py      # D-Bus service for notifications
+ │   └─ lock_events.py   # Lock event monitoring
+ ├─ guardian_hub/        # Central server (NOT YET IMPLEMENTED)
+ │   ├─ api.py           # FastAPI endpoints (stub)
+ │   ├─ models.py        # Database models (stub)
+ │   ├─ db.py            # Database connection (stub)
+ │   └─ main.py          # Entry point (stub)
  ├─ pyproject.toml
+ ├─ mkdocs.yml           # Documentation configuration
  └─ scripts/
      └─ install_artifacts.py
 ```

@@ -36,10 +36,29 @@ def chown_recursive(path, uid, gid):
 
 
 class UserManager:
+    """
+    Manages user-specific configurations, PAM time rules, and systemd services.
+    
+    This class is responsible for:
+    - Managing the 'kids' group and user memberships
+    - Writing and maintaining PAM time.conf rules for curfews
+    - Setting up user-specific systemd services (guardian-agent)
+    - Configuring D-Bus policies for agent communication
+    - Ensuring PAM modules are properly configured
+    
+    The UserManager works closely with the Policy class to enforce
+    time-based access controls and user quotas.
+    """
+    
     def user_exists(self, username):
         """
         Check if a user exists on the system.
-        Returns True if user exists, False otherwise.
+        
+        Args:
+            username: The username to check
+            
+        Returns:
+            bool: True if user exists, False otherwise
         """
         try:
             pwd.getpwnam(username)
@@ -355,14 +374,17 @@ class UserManager:
         except Exception as e:
             logger.error(f"Failed to write D-Bus policy file: {e}")
 
-    """
-    Manages user-specific configurations, including PAM time rules and systemd services.
-    """
-
     def __init__(self, policy: Policy = None, tracker: "SessionTracker" = None):
         """
         Initialize the UserManager with a policy instance and optionally a session tracker.
-        The tracker can be set later using set_tracker() to avoid circular dependencies.
+        
+        Args:
+            policy: The Policy instance containing user rules and configurations
+            tracker: The SessionTracker instance (optional, can be set later)
+        
+        Note:
+            The tracker can be set later using set_tracker() to avoid circular dependencies
+            during initialization.
         """
         self.policy = policy
         self.tracker = tracker

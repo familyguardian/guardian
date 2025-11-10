@@ -20,9 +20,40 @@ class ConfigError(Exception):
 class Config:
     """
     Handles loading, merging, and validating the daemon's configuration.
+    
+    Configuration Loading Priority (highest to lowest):
+    1. Explicitly provided path via config_path parameter
+    2. Environment variable GUARDIAN_DAEMON_CONFIG
+    3. System-wide config at /etc/guardian/daemon/config.yaml
+    4. Local config (development) in project directory
+    
+    The configuration system uses a two-layer approach:
+    - Default configuration (always loaded from default-config.yaml)
+    - User configuration (merged on top of defaults)
+    
+    This ensures that all required keys exist even if the user
+    config is minimal or missing.
+    
+    Example:
+        >>> config = Config("/etc/guardian/daemon/config.yaml")
+        >>> db_path = config.get("db_path")
+        >>> users = config["users"]
     """
 
     def __init__(self, config_path=None):
+        """
+        Initialize the configuration system.
+        
+        Args:
+            config_path: Optional explicit path to configuration file.
+                        If not provided, searches in priority order:
+                        1. GUARDIAN_DAEMON_CONFIG env var
+                        2. /etc/guardian/daemon/config.yaml
+                        3. Local config.yaml (development)
+        
+        Raises:
+            ConfigError: If configuration validation fails
+        """
         self.config_path = None
         self.data = {}
 
@@ -87,7 +118,18 @@ class Config:
             raise
 
     def _load_config(self, path):
-        """Loads a YAML configuration file."""
+        """
+        Loads a YAML configuration file.
+        
+        Args:
+            path: Path to the YAML file
+            
+        Returns:
+            dict: Parsed configuration data, or empty dict if file doesn't exist
+            
+        Raises:
+            ConfigError: If YAML parsing fails or file cannot be read
+        """
         if not os.path.exists(path):
             return {}
         try:
@@ -101,7 +143,16 @@ class Config:
             raise ConfigError(f"Could not read {path}") from e
 
     def _merge_configs(self, base, override):
-        """Recursively merges the override config into the base config."""
+        """
+        Recursively merges the override config into the base config.
+        
+        Args:
+            base: Base configuration dictionary (modified in place)
+            override: Configuration dictionary to merge in (takes priority)
+            
+        Note:
+            Dictionaries are merged recursively, all other types override.
+        """
         for key, value in override.items():
             if isinstance(value, dict) and key in base and isinstance(base[key], dict):
                 self._merge_configs(base[key], value)
@@ -127,9 +178,29 @@ class Config:
         logger.debug("Configuration validation passed.")
 
     def get(self, key, default=None):
-        """Gets a configuration value."""
+        """
+        Gets a configuration value.
+        
+        Args:
+            key: Configuration key to retrieve
+            default: Default value if key not found
+            
+        Returns:
+            The configuration value or default
+        """
         return self.data.get(key, default)
 
     def __getitem__(self, key):
-        """Allows dictionary-style access to config data."""
+        """
+        Allows dictionary-style access to config data.
+        
+        Args:
+            key: Configuration key to retrieve
+            
+        Returns:
+            The configuration value
+            
+        Raises:
+            KeyError: If key doesn't exist
+        """
         return self.data[key]

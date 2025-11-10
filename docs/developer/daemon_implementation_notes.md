@@ -57,9 +57,12 @@ children on Linux devices. It runs as a systemd service with root privileges and
   - Measures usage time per child and saves it in the database.
   - Checks quota/curfew according to the policy.
 
-- **PamManager (`pam_manager.py`)**
-  - Writes and removes login time rules in `/etc/security/time.conf` according to the policy.
-  - Backup of the original file is created automatically.
+- **UserManager (`user_manager.py`)**
+  - Manages PAM time-based access restrictions via `/etc/security/time.conf`.
+  - Ensures the `kids` group exists and users are properly assigned.
+  - Sets up user-specific systemd services for the guardian-agent.
+  - Configures D-Bus policies for user agents.
+  - Ensures `pam_time.so` module is active in PAM configuration.
 
 - **Integration (`main.py`)**
   - Initializes all components and starts the daemon.
@@ -74,13 +77,15 @@ children on Linux devices. It runs as a systemd service with root privileges and
   - Implement session termination more specifically if necessary (e.g. only graphical sessions, game sessions).
   - Develop concept for game sessions and their enforcement/notification.
 
-- **Network Client**
+- **Network Client (Not Yet Implemented)**
   - Communication with central Guardian Hub (API/WebSocket).
   - Synchronization of policies and usage data.
-  - File: `net_client.py`
+  - File: `net_client.py` (currently stub)
 
-- **Admin IPC**
-  - Implement a local socket for admin commands (bonus time, policy reload, etc.).
+- **Admin IPC (Implemented)**
+  - Local Unix socket for admin commands via guardianctl CLI.
+  - Dynamic command discovery and registration.
+  - Provides commands for user management, quota queries, timer management.
   - File: `ipc.py`
 
 - **Error and Exception Handling**

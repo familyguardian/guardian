@@ -271,24 +271,29 @@ users:
 ```text
 guardian/
  ├─ guardian_daemon/     # Hauptdaemon (systemd-Service)
- │   ├─ main.py
- │   ├─ policy.py        # Policy-Modelle (pydantic)
- │   ├─ sessions.py      # logind-Watcher
+ │   ├─ __main__.py      # Einstiegspunkt
+ │   ├─ config.py        # Konfigurationsverwaltung
+ │   ├─ policy.py        # Policy-Laden und Validierung
+ │   ├─ sessions.py      # logind-Watcher & Session-Tracking
  │   ├─ enforcer.py      # Quota/Curfew Enforcement
- │   ├─ pam_manager.py   # PAM time.conf Blöcke
- │   ├─ systemd_manager.py
- │   ├─ net_client.py    # API/WebSocket Hub
- │   ├─ storage.py       # SQLite
- │   └─ ipc.py           # Admin-Socket
+ │   ├─ user_manager.py  # PAM time.conf & Benutzerverwaltung
+ │   ├─ systemd_manager.py  # Systemd-Timer-Verwaltung
+ │   ├─ net_client.py    # API/WebSocket Hub (Stub)
+ │   ├─ storage.py       # SQLAlchemy-Speicherschicht
+ │   ├─ models.py        # Datenbankmodelle
+ │   └─ ipc.py           # Admin-Socket für CLI
  ├─ guardianctl/         # CLI-Tool
- │   └─ cli.py
+ │   └─ cli.py           # Dynamische Kommandoregistrierung
  ├─ guardian_agent/      # User-Benachrichtigungen (optional)
- ├─ guardian_hub/        # Zentralserver (FastAPI, DB, Websocket)
- │   ├─ api.py
- │   ├─ models.py
- │   ├─ db.py
- │   └─ webui/           # React/Next.js Frontend
+ │   ├─ __main__.py      # D-Bus-Service für Benachrichtigungen
+ │   └─ lock_events.py   # Lock-Event-Überwachung
+ ├─ guardian_hub/        # Zentralserver (NOCH NICHT IMPLEMENTIERT)
+ │   ├─ api.py           # FastAPI-Endpunkte (Stub)
+ │   ├─ models.py        # Datenbankmodelle (Stub)
+ │   ├─ db.py            # Datenbankverbindung (Stub)
+ │   └─ main.py          # Einstiegspunkt (Stub)
  ├─ pyproject.toml
+ ├─ mkdocs.yml           # Dokumentationskonfiguration
  └─ scripts/
      └─ install_artifacts.py
 ```
