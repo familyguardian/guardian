@@ -20,7 +20,16 @@ class GuardianIPCServer:
     """
     IPC server for admin commands of the Guardian Daemon.
     Provides a socket interface for status and control commands.
+    
+    Security: Enforces request size limits and proper authentication.
     """
+    
+    # Maximum request size: 1MB (prevents memory exhaustion attacks)
+    MAX_REQUEST_SIZE = 1024 * 1024
+    
+    # Rate limiting: max 100 requests per minute per connection
+    RATE_LIMIT_WINDOW = 60  # seconds
+    RATE_LIMIT_MAX_REQUESTS = 100
 
     def __init__(self, config, tracker: SessionTracker, policy: Policy):
         """
@@ -34,6 +43,8 @@ class GuardianIPCServer:
         self.config = config
         self.tracker = tracker
         self.policy = policy
+        # Track request counts per UID for rate limiting
+        self._request_counts = {}  # {uid: [(timestamp, count), ...]}
         # Access the user manager from the session tracker
         self.user_manager = (
             self.tracker.user_manager if hasattr(self.tracker, "user_manager") else None
@@ -87,9 +98,43 @@ class GuardianIPCServer:
 
         logger.info(f"IPC server started on {self.socket_path}")
 
+    def _check_rate_limit(self, uid: int) -> bool:
+        """
+        Check if the UID has exceeded rate limits.
+        
+        Args:
+            uid: User ID to check
+            
+        Returns:
+            bool: True if within limits, False if exceeded
+        """
+        import time
+        now = time.time()
+        
+        # Clean up old entries
+        if uid in self._request_counts:
+            self._request_counts[uid] = [
+                (ts, count) for ts, count in self._request_counts[uid]
+                if now - ts < self.RATE_LIMIT_WINDOW
+            ]
+        
+        # Count recent requests
+        if uid not in self._request_counts:
+            self._request_counts[uid] = []
+        
+        recent_count = sum(count for ts, count in self._request_counts[uid])
+        
+        if recent_count >= self.RATE_LIMIT_MAX_REQUESTS:
+            return False
+        
+        # Record this request
+        self._request_counts[uid].append((now, 1))
+        return True
+
     async def handle_connection(self, reader, writer):
         """
         Handles an incoming client connection.
+        Enforces authentication, request size limits, and rate limiting.
         """
         peer_creds = writer.get_extra_info("peereid")
 
@@ -108,10 +153,29 @@ class GuardianIPCServer:
                 peer_uid = 0
                 peer_gid = 0
 
+        # Check authorization
         if peer_uid != 0 and (self.admin_gid is None or peer_gid != self.admin_gid):
             logger.warning(
                 f"Unauthorized IPC connection from UID={peer_uid}, GID={peer_gid}. Closing."
             )
+            writer.close()
+            await writer.wait_closed()
+            return
+        
+        # Check rate limiting (root is exempt)
+        if peer_uid != 0 and not self._check_rate_limit(peer_uid):
+            logger.warning(
+                f"Rate limit exceeded for UID={peer_uid}. "
+                f"Max {self.RATE_LIMIT_MAX_REQUESTS} requests per {self.RATE_LIMIT_WINDOW}s"
+            )
+            error_response = json.dumps({"error": "Rate limit exceeded. Try again later."})
+            error_data = error_response.encode()
+            try:
+                writer.write(len(error_data).to_bytes(4, "big"))
+                writer.write(error_data)
+                await writer.drain()
+            except Exception:
+                pass
             writer.close()
             await writer.wait_closed()
             return
@@ -120,6 +184,29 @@ class GuardianIPCServer:
             # Read message length (4 bytes)
             len_data = await reader.readexactly(4)
             msg_len = int.from_bytes(len_data, "big")
+            
+            # Validate message size to prevent memory exhaustion
+            if msg_len > self.MAX_REQUEST_SIZE:
+                logger.warning(
+                    f"Rejected oversized IPC request: {msg_len} bytes from "
+                    f"UID={peer_uid} (max: {self.MAX_REQUEST_SIZE} bytes)"
+                )
+                error_response = json.dumps({
+                    "error": f"Request too large. Maximum size is {self.MAX_REQUEST_SIZE} bytes"
+                })
+                error_data = error_response.encode()
+                writer.write(len(error_data).to_bytes(4, "big"))
+                writer.write(error_data)
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+            
+            if msg_len <= 0:
+                logger.warning(f"Invalid message length: {msg_len} from UID={peer_uid}")
+                writer.close()
+                await writer.wait_closed()
+                return
 
             # Read message
             data = await reader.readexactly(msg_len)

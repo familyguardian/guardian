@@ -285,22 +285,44 @@ def setup_user_service(self, username: str):
 - ✅ Added comprehensive test suite (140+ test cases)
 - ✅ Applied to all methods accepting usernames
 
-**CRITICAL: PAM Configuration Modification**
+**CRITICAL: PAM Configuration Modification** ✅ **FIXED**
 ```python
-# user_manager.py, line ~1138
+# user_manager.py - FIXED in commit 51ca021
 def _ensure_sddm_pam_time(self):
-    # Directly modifies system authentication files
-    with open("/etc/pam.d/sddm", "r") as f:
-        content = f.read()
+    # Create timestamped backup
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = Path(f"{sddm_pam_path}.guardian.{timestamp}.bak")
+    shutil.copy2(sddm_pam_path, backup_path)
+    
+    # Validate PAM syntax before writing
+    for line in modified_lines:
+        parts = stripped.split()
+        if len(parts) < 3 or parts[0] not in valid_types:
+            logger.error("Invalid PAM syntax, aborting")
+            return False
+    
+    # Atomic write with temporary file
+    temp_path = Path(f"{sddm_pam_path}.tmp")
+    with open(temp_path, "w") as f:
+        f.writelines(modified_lines)
+    temp_path.rename(sddm_pam_path)  # Atomic
+    
+    # Auto-rollback on failure
+    except Exception as e:
+        shutil.copy2(backup_path, sddm_pam_path)
 ```
 
 **Issue:** Direct modification of critical system authentication files without backup or validation. A bug could lock all users out of the system.
 
-**Recommendation:** 
-- Create backup before modification
-- Validate PAM syntax before writing
-- Implement rollback capability
-- Consider using drop-in configuration files instead
+**Resolution:**
+- ✅ Create timestamped backups before all modifications
+- ✅ Maintain "last known good" backup for quick recovery
+- ✅ Validate PAM syntax (type must be auth/account/password/session)
+- ✅ Ensure minimum 3 parts per line (type, control, module)
+- ✅ Use atomic file replacement (write to .tmp, then rename)
+- ✅ Automatic rollback on modification failure
+- ✅ Applied to both _ensure_sddm_pam_time() and write_time_rules()
+- Note: Drop-in configs not feasible for PAM, current approach is safest
 
 **CRITICAL: IPC Socket Permissions**
 ```python
