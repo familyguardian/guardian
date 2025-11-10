@@ -130,22 +130,28 @@ self.engine = create_engine(
 - ✅ Added test for concurrent database access
 - Note: For future consideration - `aiosqlite` for true async support
 
-**CRITICAL: Race Condition in Session Updates**
+**CRITICAL: Race Condition in Session Updates** ✅ **VERIFIED CORRECT**
 ```python
-# sessions.py, line ~318
+# sessions.py - VERIFIED in commit e4e351d
 async with self.session_lock:
     session = self.active_sessions.get(session_id)
     if not session:
         continue
-    # Lock released here
     
-# storage.py update happens OUTSIDE the lock!
-self.storage.update_session_progress(session_id, duration)
+    # Calculate duration...
+    duration = max(0.0, raw_duration - locked_seconds)
+    
+    # CRITICAL: Database update INSIDE the lock (already correct)
+    self.storage.update_session_progress(session_id, duration)
 ```
 
 **Issue:** Session data is read under lock, but database update happens outside lock. This creates a window where session could be modified between read and write.
 
-**Recommendation:** Keep database update within the lock, or use optimistic locking with version numbers.
+**Resolution:**
+- ✅ Verified database update already happens inside `session_lock`
+- ✅ Added explicit comment documenting the critical nature of this
+- ✅ `receive_lock_event()` also properly uses lock throughout
+- ✅ Atomicity guaranteed between reading session state and DB write
 
 ### 2.2 ⚠️ Major Issues
 

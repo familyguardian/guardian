@@ -48,7 +48,28 @@ class UserManager:
     
     The UserManager works closely with the Policy class to enforce
     time-based access controls and user quotas.
+    
+    Security: All methods that accept usernames validate them against path traversal
+    and use canonical system paths via pwd.getpwnam().
     """
+    
+    @staticmethod
+    def validate_username(username: str) -> bool:
+        """
+        Validate username format to prevent path traversal and injection attacks.
+        
+        Args:
+            username: The username to validate
+            
+        Returns:
+            bool: True if username is valid, False otherwise
+        """
+        import re
+        # Only allow alphanumeric characters, underscore, and hyphen
+        # This prevents path traversal (../) and other injection attempts
+        if not username or not isinstance(username, str):
+            return False
+        return bool(re.match(r'^[a-zA-Z0-9_-]+$', username))
     
     def user_exists(self, username):
         """
@@ -60,6 +81,8 @@ class UserManager:
         Returns:
             bool: True if user exists, False otherwise
         """
+        if not self.validate_username(username):
+            return False
         try:
             pwd.getpwnam(username)
             return True
@@ -804,9 +827,18 @@ class UserManager:
         Sets up the guardian_agent.service for the given user's systemd.
         Updates the service file if its checksum has changed.
         Ensures correct directory structure and permissions.
+        
+        Security: Validates username and uses pwd.getpwnam() to prevent path traversal.
         """
+        # Validate username format to prevent path traversal
+        if not self.validate_username(username):
+            logger.error(f"Invalid username format: {username}")
+            return
+        
         try:
+            # Get canonical user info from system - prevents path traversal
             user_info = pwd.getpwnam(username)
+            # Use the canonical home directory from system, not user input
             user_home = Path(user_info.pw_dir)
             config_path = user_home / ".config"
             user_systemd_path = config_path / "systemd/user"
@@ -960,10 +992,18 @@ class UserManager:
         """
         Ensure that systemd user services are set up for the given user without enabling lingering.
         Only starts the service if the user is actively logged in with a session.
+        
+        Security: Validates username and uses pwd.getpwnam() to prevent path traversal.
         """
+        # Validate username format to prevent path traversal
+        if not self.validate_username(username):
+            logger.error(f"Invalid username format: {username}")
+            return
+        
         try:
-            # First check if user exists in the system
+            # Get canonical user info from system - prevents path traversal
             user_info = pwd.getpwnam(username)
+            # Use the canonical home directory from system, not user input
             user_home = Path(user_info.pw_dir)
 
             # Check if user is actively logged in (has active sessions)
