@@ -8,12 +8,12 @@ import yaml
 from guardian_daemon.config import Config, ConfigError
 from guardian_daemon.enforcer import Enforcer
 from guardian_daemon.ipc import GuardianIPCServer
-from guardian_daemon.logging import get_logger, setup_logging
+from guardian_daemon.logging import setup_logging, get_logger
 from guardian_daemon.policy import Policy
 from guardian_daemon.sessions import SessionTracker
 from guardian_daemon.storage import Storage
 from guardian_daemon.systemd_manager import SystemdManager
-from guardian_daemon.user_manager import UserManager
+from guardian_daemon.user_manager import UserManager, SetupError
 
 logger = get_logger("GuardianDaemon")
 
@@ -159,12 +159,23 @@ def main():
         logging.basicConfig()
         log = logging.getLogger("GuardianDaemon")
         log.error(f"Configuration error: {e}")
+        raise SystemExit(1)
+    except SetupError as e:
+        # Critical setup failure - cannot continue
+        import logging
+
+        logging.basicConfig()
+        log = logging.getLogger("GuardianDaemon")
+        log.error(f"Critical setup failure: {e}")
+        log.error("Guardian daemon cannot start due to setup errors. Please check system configuration.")
+        raise SystemExit(1)
     except Exception as e:
         import logging
 
         logging.basicConfig()
         log = logging.getLogger("GuardianDaemon")
         log.error(f"An unexpected error occurred: {e}", exc_info=True)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

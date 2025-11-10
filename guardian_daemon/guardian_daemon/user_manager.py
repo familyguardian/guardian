@@ -20,6 +20,11 @@ if TYPE_CHECKING:
 
 logger = get_logger("UserManager")
 
+
+class SetupError(Exception):
+    """Exception raised when critical setup operations fail."""
+    pass
+
 TIME_CONF_PATH = Path("/etc/security/time.conf")
 # Assumes the script is run from the project's structure, giving us the root.
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -105,11 +110,16 @@ class UserManager:
             logger.info("Creating group 'kids'.")
             try:
                 subprocess.run(
-                    ["groupadd", "kids"], check=True, capture_output=True, text=True
+                    ["groupadd", "kids"], check=True, capture_output=True, text=True, timeout=5
                 )
             except subprocess.CalledProcessError as e:
-                logger.error(f"Failed to create group 'kids': {e.stderr}")
-                return
+                error_msg = f"Failed to create group 'kids': {e.stderr}"
+                logger.error(error_msg)
+                raise SetupError(error_msg) from e
+            except subprocess.TimeoutExpired as e:
+                error_msg = "Group creation command timed out after 5 seconds"
+                logger.error(error_msg)
+                raise SetupError(error_msg) from e
 
         # Process each managed user
         for username in managed_users:
@@ -207,8 +217,9 @@ class UserManager:
 
         # Also set up the authselect profile for system-wide consistency
         if not shutil.which("authselect"):
-            logger.error("authselect command not found. This system is not supported.")
-            return
+            error_msg = "authselect command not found. This system is not supported."
+            logger.error(error_msg)
+            raise SetupError(error_msg)
 
         guardian_profile_name = "guardian"
         custom_profile_path = Path(f"/etc/authselect/custom/{guardian_profile_name}")
@@ -277,8 +288,9 @@ class UserManager:
             # We only need to modify system-auth, as password-auth typically includes it.
             system_auth_path = custom_profile_path / "system-auth"
             if not system_auth_path.exists():
-                logger.error(f"Custom profile is broken. Missing {system_auth_path}")
-                return
+                error_msg = f"Custom profile is broken. Missing {system_auth_path}"
+                logger.error(error_msg)
+                raise SetupError(error_msg)
 
             with open(system_auth_path, "r+") as f:
                 lines = f.readlines()
