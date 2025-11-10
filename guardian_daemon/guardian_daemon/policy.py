@@ -44,8 +44,20 @@ class Policy:
 
     def has_quota(self, username: str) -> bool:
         """Check if a user has quota settings."""
-        user_settings = self.data.get("users", {}).get(username, {})
-        return "quota" in user_settings
+        # Check both config and database for quota settings
+        user_settings_config = self.data.get("users", {}).get(username, {})
+        user_settings_db = self.storage.get_user_settings(username)
+        
+        # Support both formats:
+        # New format: "quota" key exists
+        # Old format: "daily_quota_minutes" key exists
+        if user_settings_config and "quota" in user_settings_config:
+            return True
+        if user_settings_db:
+            if "quota" in user_settings_db or "daily_quota_minutes" in user_settings_db:
+                return True
+        
+        return False
 
     def has_curfew(self, username: str) -> bool:
         """Check if a user has curfew settings."""
@@ -56,10 +68,25 @@ class Policy:
         """Get daily and weekly quota for a user."""
         if username not in self.data.get("users", {}):
             raise KeyError(f"User {username} not found in policy")
-        user_settings = self.data["users"][username]
-        quota = user_settings.get("quota", {})
-        daily = quota.get("daily", 0)
-        weekly = quota.get("weekly", 0)
+        
+        # Get user settings from database (which has the actual values)
+        user_settings = self.storage.get_user_settings(username)
+        if not user_settings:
+            # Fallback to config data
+            user_settings = self.data["users"][username]
+        
+        # Support both formats:
+        # 1. New format: {"quota": {"daily": 90, "weekly": 0}}
+        # 2. Old format: {"daily_quota_minutes": 90}
+        if "quota" in user_settings:
+            quota = user_settings["quota"]
+            daily = quota.get("daily", 0)
+            weekly = quota.get("weekly", 0)
+        else:
+            # Old format or direct keys
+            daily = user_settings.get("daily_quota_minutes", 0)
+            weekly = user_settings.get("weekly_quota_minutes", 0)
+        
         return daily, weekly
 
     def get_user_curfew(
