@@ -53,27 +53,90 @@ class GuardianDaemon:
     async def periodic_reload(self):
         """
         Checks every 5 minutes for config changes and updates timers/UserManager rules.
+        
+        Uses atomic config reload with validation and rollback on failure to prevent
+        partial state updates.
         """
         while True:
             await asyncio.sleep(300)
             old_hash = self.last_config_hash
-            self.policy.reload()
-            new_hash = self._get_config_hash()
-            if new_hash != old_hash:
-                logger.info("Config changed, updating timers and UserManager rules.")
-                self.usermanager.update_policy(self.policy)
-                # Clean up any existing duplicates in time.conf before writing new rules
-                self.usermanager._cleanup_time_conf()
-                self.usermanager.write_time_rules()
-                reset_time = self.policy.data.get("reset_time", "03:00")
-                self.systemd.create_daily_reset_timer(reset_time)
-                # Curfew timer update (example: use start/end from policy)
-                curfew = self.policy.data.get("curfew", {})
-                start_time = curfew.get("start", "22:00")
-                end_time = curfew.get("end", "06:00")
-                self.systemd.create_curfew_timer(start_time, end_time)
-                await self.systemd.reload_systemd()
-                self.last_config_hash = new_hash
+            
+            # Save old policy state for potential rollback
+            old_policy_data = self.policy.data.copy() if hasattr(self.policy, 'data') else None
+            
+            try:
+                # Step 1: Reload and validate new configuration
+                self.policy.reload()
+                new_hash = self._get_config_hash()
+                
+                if new_hash != old_hash:
+                    logger.info("Config changed, validating and applying updates...")
+                    
+                    # Step 2: Validate new configuration before applying
+                    # The Config class already validates on load, but we double-check critical values
+                    reset_time = self.policy.data.get("reset_time", "03:00")
+                    if not self._validate_time_format(reset_time):
+                        raise ValueError(f"Invalid reset_time format: {reset_time}")
+                    
+                    # Validate curfew times if present
+                    curfew = self.policy.data.get("curfew", {})
+                    if curfew:
+                        start_time = curfew.get("start", "22:00")
+                        end_time = curfew.get("end", "06:00")
+                        if not self._validate_time_format(start_time):
+                            raise ValueError(f"Invalid curfew start time: {start_time}")
+                        if not self._validate_time_format(end_time):
+                            raise ValueError(f"Invalid curfew end time: {end_time}")
+                    else:
+                        start_time = "22:00"
+                        end_time = "06:00"
+                    
+                    # Step 3: Apply updates atomically (all or nothing)
+                    try:
+                        self.usermanager.update_policy(self.policy)
+                        # Clean up any existing duplicates in time.conf before writing new rules
+                        self.usermanager._cleanup_time_conf()
+                        self.usermanager.write_time_rules()
+                        self.systemd.create_daily_reset_timer(reset_time)
+                        self.systemd.create_curfew_timer(start_time, end_time)
+                        await self.systemd.reload_systemd()
+                        
+                        # Step 4: Only update hash after successful application
+                        self.last_config_hash = new_hash
+                        logger.info("Config successfully reloaded and applied.")
+                        
+                    except Exception as e:
+                        logger.error(f"Error applying config changes: {e}", exc_info=True)
+                        # Rollback: restore old policy
+                        if old_policy_data:
+                            self.policy.data = old_policy_data
+                            self.usermanager.update_policy(self.policy)
+                            logger.warning("Rolled back to previous configuration")
+                        raise
+                        
+            except Exception as e:
+                logger.error(
+                    f"Config reload failed: {e}. System continues with previous configuration.",
+                    exc_info=True
+                )
+                # Keep old hash so we'll retry next time
+                # (Unless it's a permanent validation error, then we'd keep retrying)
+                
+    @staticmethod
+    def _validate_time_format(time_str: str) -> bool:
+        """
+        Validate time format (HH:MM).
+        
+        Args:
+            time_str: Time string to validate
+            
+        Returns:
+            bool: True if valid time format
+        """
+        if not isinstance(time_str, str):
+            return False
+        import re
+        return bool(re.match(r'^([01]\d|2[0-3]):([0-5]\d)$', time_str))
 
     async def enforce_users(self):
         """

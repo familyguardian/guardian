@@ -23,7 +23,7 @@ notifications:
 
 defaults:
   # Maximale Nutzungszeit pro Tag in Minuten (Standard für alle Nutzer)
-  daily_quota_minutes: 90
+  daily_quota_minutes: 60
 
   # Zeitfenster, in denen Logins erlaubt sind (Curfew, Standard für alle Nutzer)
   curfew:
