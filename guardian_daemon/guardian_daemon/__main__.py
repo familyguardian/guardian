@@ -8,12 +8,12 @@ import yaml
 from guardian_daemon.config import Config, ConfigError
 from guardian_daemon.enforcer import Enforcer
 from guardian_daemon.ipc import GuardianIPCServer
-from guardian_daemon.logging import setup_logging, get_logger
+from guardian_daemon.logging import get_logger, setup_logging
 from guardian_daemon.policy import Policy
 from guardian_daemon.sessions import SessionTracker
 from guardian_daemon.storage import Storage
 from guardian_daemon.systemd_manager import SystemdManager
-from guardian_daemon.user_manager import UserManager, SetupError
+from guardian_daemon.user_manager import SetupError, UserManager
 
 logger = get_logger("GuardianDaemon")
 
@@ -53,31 +53,33 @@ class GuardianDaemon:
     async def periodic_reload(self):
         """
         Checks every 5 minutes for config changes and updates timers/UserManager rules.
-        
+
         Uses atomic config reload with validation and rollback on failure to prevent
         partial state updates.
         """
         while True:
             await asyncio.sleep(300)
             old_hash = self.last_config_hash
-            
+
             # Save old policy state for potential rollback
-            old_policy_data = self.policy.data.copy() if hasattr(self.policy, 'data') else None
-            
+            old_policy_data = (
+                self.policy.data.copy() if hasattr(self.policy, "data") else None
+            )
+
             try:
                 # Step 1: Reload and validate new configuration
                 self.policy.reload()
                 new_hash = self._get_config_hash()
-                
+
                 if new_hash != old_hash:
                     logger.info("Config changed, validating and applying updates...")
-                    
+
                     # Step 2: Validate new configuration before applying
                     # The Config class already validates on load, but we double-check critical values
                     reset_time = self.policy.data.get("reset_time", "03:00")
                     if not self._validate_time_format(reset_time):
                         raise ValueError(f"Invalid reset_time format: {reset_time}")
-                    
+
                     # Validate curfew times if present
                     curfew = self.policy.data.get("curfew", {})
                     if curfew:
@@ -90,7 +92,7 @@ class GuardianDaemon:
                     else:
                         start_time = "22:00"
                         end_time = "06:00"
-                    
+
                     # Step 3: Apply updates atomically (all or nothing)
                     try:
                         self.usermanager.update_policy(self.policy)
@@ -100,43 +102,46 @@ class GuardianDaemon:
                         self.systemd.create_daily_reset_timer(reset_time)
                         self.systemd.create_curfew_timer(start_time, end_time)
                         await self.systemd.reload_systemd()
-                        
+
                         # Step 4: Only update hash after successful application
                         self.last_config_hash = new_hash
                         logger.info("Config successfully reloaded and applied.")
-                        
+
                     except Exception as e:
-                        logger.error(f"Error applying config changes: {e}", exc_info=True)
+                        logger.error(
+                            f"Error applying config changes: {e}", exc_info=True
+                        )
                         # Rollback: restore old policy
                         if old_policy_data:
                             self.policy.data = old_policy_data
                             self.usermanager.update_policy(self.policy)
                             logger.warning("Rolled back to previous configuration")
                         raise
-                        
+
             except Exception as e:
                 logger.error(
                     f"Config reload failed: {e}. System continues with previous configuration.",
-                    exc_info=True
+                    exc_info=True,
                 )
                 # Keep old hash so we'll retry next time
                 # (Unless it's a permanent validation error, then we'd keep retrying)
-                
+
     @staticmethod
     def _validate_time_format(time_str: str) -> bool:
         """
         Validate time format (HH:MM).
-        
+
         Args:
             time_str: Time string to validate
-            
+
         Returns:
             bool: True if valid time format
         """
         if not isinstance(time_str, str):
             return False
         import re
-        return bool(re.match(r'^([01]\d|2[0-3]):([0-5]\d)$', time_str))
+
+        return bool(re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str))
 
     async def enforce_users(self):
         """
@@ -198,12 +203,39 @@ class GuardianDaemon:
         self.systemd.create_curfew_timer(start_time, end_time)
         await self.systemd.reload_systemd()
         await self.check_and_recover_reset()
-        await asyncio.gather(
-            self.tracker.run(),
-            self.periodic_reload(),
-            self.enforce_users(),
-            self.ipc_server.start(),
-        )
+
+        try:
+            await asyncio.gather(
+                self.tracker.run(),
+                self.periodic_reload(),
+                self.enforce_users(),
+                self.ipc_server.start(),
+            )
+        finally:
+            # Ensure proper cleanup on shutdown
+            logger.info("Shutting down Guardian daemon...")
+            await self.shutdown()
+
+    async def shutdown(self):
+        """
+        Clean shutdown of all daemon components.
+        """
+        try:
+            # Close IPC server and clean up socket
+            if self.ipc_server and self.ipc_server.server:
+                logger.debug("Closing IPC server...")
+                self.ipc_server.server.close()
+                await self.ipc_server.server.wait_closed()
+                self.ipc_server.close()  # Remove socket file
+
+            # Close database connections
+            if self.storage:
+                logger.debug("Closing database connections...")
+                self.storage.close()
+
+            logger.info("Guardian daemon shutdown complete.")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}", exc_info=True)
 
 
 def main():
@@ -230,7 +262,9 @@ def main():
         logging.basicConfig()
         log = logging.getLogger("GuardianDaemon")
         log.error(f"Critical setup failure: {e}")
-        log.error("Guardian daemon cannot start due to setup errors. Please check system configuration.")
+        log.error(
+            "Guardian daemon cannot start due to setup errors. Please check system configuration."
+        )
         raise SystemExit(1)
     except Exception as e:
         import logging

@@ -277,18 +277,17 @@ with open(system_auth_path, "r+") as f:
 
 **Recommendation:** Use separate read and write operations with atomic file replacement.
 
-**Missing Resource Cleanup**
-```python
-# ipc.py, line ~71
-self.server = await asyncio.start_unix_server(
-    self.handle_connection, path=self.socket_path
-)
-# No cleanup on shutdown registered
-```
+**✅ Missing Resource Cleanup** *(RESOLVED - Commit [pending])*
 
-**Issue:** IPC socket server is started but never explicitly closed. Socket file may persist after daemon exits.
+**Original Issue:** IPC socket server is started but never explicitly closed. Socket file may persist after daemon exits.
 
-**Recommendation:** Implement proper shutdown handlers with resource cleanup.
+**Resolution:**
+- Added `shutdown()` method to `GuardianDaemon` for clean exit
+- IPC server now properly closed with `server.close()` and `wait_closed()`
+- Socket file removed on shutdown via `ipc_server.close()`
+- Database connections closed on shutdown via `storage.close()`
+- Wrapped `asyncio.gather()` in try-finally for guaranteed cleanup
+- Improves daemon reliability and prevents resource leaks
 
 ---
 
