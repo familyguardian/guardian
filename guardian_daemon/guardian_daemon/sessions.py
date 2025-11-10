@@ -264,19 +264,62 @@ class SessionTracker:
                         break
             # No longer updating DB here; periodic task handles it.
 
+    async def _get_dbus_connection(self):
+        """
+        Get or create a D-Bus connection with retry logic.
+        
+        Returns:
+            tuple: (bus, manager) D-Bus objects
+            
+        Raises:
+            Exception: If connection fails after all retries
+        """
+        max_retries = 3
+        retry_delay = 2.0
+        
+        for attempt in range(max_retries):
+            try:
+                bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+                logind = bus.get_proxy_object(
+                    "org.freedesktop.login1",
+                    "/org/freedesktop/login1",
+                    await bus.introspect("org.freedesktop.login1", "/org/freedesktop/login1")
+                )
+                manager = logind.get_interface("org.freedesktop.login1.Manager")
+                logger.debug("D-Bus connection established successfully")
+                return bus, manager
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"D-Bus connection attempt {attempt + 1}/{max_retries} failed: {e}. "
+                        f"Retrying in {retry_delay}s..."
+                    )
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    logger.error(f"Failed to connect to D-Bus after {max_retries} attempts: {e}")
+                    raise
+
     async def periodic_session_update(self, interval: int = 60):
         """
         Periodically update all active sessions in the database with current duration.
         This is critical for preserving session time across daemon restarts.
+        Includes robust D-Bus connection handling with automatic reconnection.
         """
-        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-        logind = bus.get_proxy_object(
-            "org.freedesktop.login1", "/org/freedesktop/login1", await bus.introspect("org.freedesktop.login1", "/org/freedesktop/login1")
-        )
-        manager = logind.get_interface("org.freedesktop.login1.Manager")
-
+        bus = None
+        manager = None
+        
         while True:
             try:
+                # Ensure we have a valid D-Bus connection
+                if bus is None or manager is None:
+                    try:
+                        bus, manager = await self._get_dbus_connection()
+                    except Exception as e:
+                        logger.error(f"Cannot update sessions without D-Bus connection: {e}")
+                        await asyncio.sleep(interval)
+                        continue
+                
                 now = time.time()
                 active_session_ids = list(self.active_sessions.keys())
 
@@ -309,6 +352,11 @@ class SessionTracker:
                         logger.error(
                             f"Failed to check lock state for session {session_id}: {e}"
                         )
+                        # If we get a D-Bus error, reconnect on next iteration
+                        if "dbus" in str(e).lower() or "disconnect" in str(e).lower():
+                            logger.warning("D-Bus error detected, will reconnect on next iteration")
+                            bus = None
+                            manager = None
 
                     async with self.session_lock:
                         # Re-fetch session data in case it changed
@@ -344,7 +392,12 @@ class SessionTracker:
                                 f"Session {session_id} for {username} has accumulated {duration/60:.1f} minutes"
                             )
             except Exception as e:
-                logger.error(f"Error in periodic session update: {e}")
+                logger.error(f"Error in periodic session update: {e}", exc_info=True)
+                # Reset D-Bus connection on error to force reconnection
+                if "dbus" in str(e).lower() or "disconnect" in str(e).lower():
+                    logger.warning("D-Bus error in main loop, resetting connection")
+                    bus = None
+                    manager = None
 
             # Wait for the next update interval
             await asyncio.sleep(interval)

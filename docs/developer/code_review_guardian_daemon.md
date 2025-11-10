@@ -87,22 +87,27 @@ async def periodic_session_update(self, interval: int = 60):
 
 **Recommendation:** Wrap D-Bus calls in try-except blocks with exponential backoff retry logic. Implement connection health checks.
 
-**CRITICAL: Database Connection Not Pooled**
+**CRITICAL: Database Connection Not Pooled** ✅ **FIXED**
 ```python
-# storage.py
+# storage.py - FIXED in commit f442d72
 self.engine = create_engine(
     f"sqlite:///{self.db_path}",
     echo=False,
-    connect_args={"check_same_thread": False}
+    poolclass=StaticPool,  # Added: proper SQLite pooling
+    connect_args={
+        "check_same_thread": False,
+        "timeout": 30  # Added: 30 second timeout
+    }
 )
 ```
 
 **Issue:** SQLite with `check_same_thread=False` can lead to concurrency issues. No connection pool configuration visible. Multiple concurrent operations could corrupt the database.
 
-**Recommendation:** 
-- Use proper connection pooling with `poolclass=StaticPool` for SQLite
-- Add proper locking mechanisms
-- Consider using `aiosqlite` for true async support
+**Resolution:** 
+- ✅ Added `StaticPool` for thread-safe single connection
+- ✅ Added 30-second timeout for lock acquisition
+- ✅ Added test for concurrent database access
+- Note: For future consideration - `aiosqlite` for true async support
 
 **CRITICAL: Race Condition in Session Updates**
 ```python
