@@ -680,32 +680,34 @@ logger.debug(f"Updating session {session_id} for {username}: ...")
 
 ### 7.1 Configuration Management
 
-**MAJOR: Config Reload Race Condition**
-```python
-# __main__.py, line ~57
-async def periodic_reload(self):
-    # ...
-    self.policy.reload()
-    new_hash = self._get_config_hash()
-    if new_hash != old_hash:
-        # Multiple operations without coordination
-        self.usermanager.update_policy(self.policy)
-        self.usermanager.write_time_rules()
-```
+**✅ MAJOR: Config Reload Race Condition** *(RESOLVED - Commit 818c091)*
 
-**Issue:** Config reload updates multiple components without atomic transaction. Partial state possible if error occurs mid-update.
+**Original Issues:**
+1. Config reload updated multiple components without atomic transaction - partial state possible if error occurred mid-update
+2. No validation of new config before applying - invalid config could break running system
 
-**Recommendation:** Implement two-phase commit or rollback capability for config updates.
+**Resolution:**
+- Implemented atomic config reload with validation and rollback in `periodic_reload()`
+- Added `_validate_time_format()` static method for time validation
+- Safe reload process:
+  1. **Save state**: Deep copy old policy data before changes
+  2. **Validate**: Check reset_time and curfew formats before applying
+  3. **Apply atomically**: All changes in try block - succeed or fail together
+  4. **Rollback on error**: Restore previous policy state if any step fails
+  5. **Update hash**: Only after successful application
 
-**Missing Validation on Reload**
-```python
-self.policy.reload()
-# No validation that new config is valid before applying
-```
+**Safety Guarantees:**
+- Atomic updates: all changes applied or none applied
+- Validation prevents invalid configs from being applied
+- Rollback restores previous working state on any failure
+- Hash only updates on success (prevents repeated bad config)
+- System continues with old config if new one fails
+- Graceful handling of missing curfew (uses defaults)
 
-**Issue:** Invalid config could be loaded and applied, breaking running system.
-
-**Recommendation:** Validate new configuration before applying. Keep old config as backup.
+**Testing:**
+- Created `test_config_reload.py` with 7 test cases
+- Tests cover validation, rollback, atomicity, error handling
+- All tests passing
 
 ### 7.2 Database Migrations
 
