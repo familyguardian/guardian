@@ -159,21 +159,100 @@ class Config:
             else:
                 base[key] = value
 
+    @staticmethod
+    def _validate_time_format(time_str: str, field_name: str) -> None:
+        """Validate HH:MM time format."""
+        import re
+        if not isinstance(time_str, str):
+            raise ConfigError(f"'{field_name}' must be a string")
+        if not re.match(r'^(2[0-3]|[01]?[0-9]):([0-5][0-9])$', time_str):
+            raise ConfigError(
+                f"'{field_name}' has invalid time format: '{time_str}'. Expected HH:MM (00:00-23:59)"
+            )
+    
+    @staticmethod
+    def _validate_positive_integer(value: any, field_name: str, allow_zero: bool = False) -> None:
+        """Validate that value is a positive integer."""
+        if not isinstance(value, int):
+            raise ConfigError(f"'{field_name}' must be an integer, got {type(value).__name__}")
+        if allow_zero:
+            if value < 0:
+                raise ConfigError(f"'{field_name}' must be non-negative, got {value}")
+        else:
+            if value <= 0:
+                raise ConfigError(f"'{field_name}' must be positive, got {value}")
+
     def _validate_config(self):
         """
-        Validates the loaded configuration against a basic schema.
-        Raises ConfigError on validation failure.
+        Validates the loaded configuration against a comprehensive schema.
+        Raises ConfigError on validation failure with specific error messages.
         """
+        # Validate logging section
         if not isinstance(self.data.get("logging"), dict):
             raise ConfigError("'logging' section is missing or not a dictionary.")
+        
+        logging_cfg = self.data.get("logging", {})
+        valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        if "level" in logging_cfg:
+            if logging_cfg["level"] not in valid_log_levels:
+                raise ConfigError(
+                    f"Invalid log level: '{logging_cfg['level']}'. "
+                    f"Must be one of: {', '.join(valid_log_levels)}"
+                )
+        
+        # Validate paths
         if not isinstance(self.data.get("db_path"), str):
             raise ConfigError("'db_path' is missing or not a string.")
         if not isinstance(self.data.get("ipc_socket"), str):
             raise ConfigError("'ipc_socket' is missing or not a string.")
-
+        
+        # Validate reset_time format
+        if "reset_time" in self.data:
+            self._validate_time_format(self.data["reset_time"], "reset_time")
+        
+        # Validate users section
         users = self.data.get("users")
-        if users and not isinstance(users, dict):
-            raise ConfigError("'users' section must be a dictionary.")
+        if users is not None:
+            if not isinstance(users, dict):
+                raise ConfigError("'users' section must be a dictionary.")
+            
+            # Validate each user's configuration
+            for username, user_config in users.items():
+                if not isinstance(user_config, dict):
+                    raise ConfigError(f"Configuration for user '{username}' must be a dictionary.")
+                
+                # Validate quota if present
+                if "quota" in user_config:
+                    quota = user_config["quota"]
+                    if not isinstance(quota, dict):
+                        raise ConfigError(f"'{username}.quota' must be a dictionary.")
+                    
+                    if "daily" in quota:
+                        self._validate_positive_integer(quota["daily"], f"{username}.quota.daily", allow_zero=True)
+                    if "weekly" in quota:
+                        self._validate_positive_integer(quota["weekly"], f"{username}.quota.weekly", allow_zero=True)
+                
+                # Validate curfew if present
+                if "curfew" in user_config:
+                    curfew = user_config["curfew"]
+                    if not isinstance(curfew, dict):
+                        raise ConfigError(f"'{username}.curfew' must be a dictionary.")
+                    
+                    # Validate curfew time windows
+                    for period in ["weekday", "weekend"]:
+                        if period in curfew:
+                            period_cfg = curfew[period]
+                            if not isinstance(period_cfg, dict):
+                                raise ConfigError(f"'{username}.curfew.{period}' must be a dictionary.")
+                            
+                            if "start" in period_cfg:
+                                self._validate_time_format(period_cfg["start"], f"{username}.curfew.{period}.start")
+                            if "end" in period_cfg:
+                                self._validate_time_format(period_cfg["end"], f"{username}.curfew.{period}.end")
+                
+                # Validate grace_minutes if present
+                if "grace_minutes" in user_config:
+                    self._validate_positive_integer(user_config["grace_minutes"], f"{username}.grace_minutes")
 
         logger.debug("Configuration validation passed.")
 
