@@ -7,20 +7,10 @@ Key design decisions:
 - Unique constraint on (username, date, start_time) to prevent duplicate sessions
 """
 
-from datetime import datetime
 from datetime import date as date_type
 from typing import Optional
 
-from sqlalchemy import (
-    String,
-    Integer,
-    Float,
-    DateTime,
-    Date,
-    Text,
-    Index,
-    UniqueConstraint,
-)
+from sqlalchemy import Date, Float, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -33,7 +23,7 @@ class Base(DeclarativeBase):
 class Session(Base):
     """
     Represents a user session.
-    
+
     Note: The id is an autoincrement value, NOT the logind session ID.
     The logind_session_id is stored separately as it's transient and can be
     reused by the system for different users on different days.
@@ -57,7 +47,7 @@ class Session(Base):
     # Timestamps
     start_time: Mapped[float] = mapped_column(Float, nullable=False)
     end_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    
+
     # Duration in seconds
     duration: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 

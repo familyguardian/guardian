@@ -348,6 +348,10 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "coverage" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
     { name = "types-psutil" },
 ]
 
@@ -361,7 +365,13 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "types-psutil", specifier = ">=7.0.0.20250822" }]
+dev = [
+    { name = "coverage", specifier = ">=7.4.3" },
+    { name = "pytest", specifier = ">=8.4.2" },
+    { name = "pytest-asyncio", specifier = ">=0.23.5" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+    { name = "types-psutil", specifier = ">=7.0.0.20250822" },
+]
 
 [[package]]
 name = "guardian-daemon"
@@ -426,6 +436,24 @@ name = "guardian-hub"
 version = "0.1.0"
 source = { virtual = "guardian_hub" }
 
+[package.dev-dependencies]
+dev = [
+    { name = "coverage" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "coverage", specifier = ">=7.4.3" },
+    { name = "pytest", specifier = ">=8.4.2" },
+    { name = "pytest-asyncio", specifier = ">=0.23.5" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+]
+
 [[package]]
 name = "guardianctl"
 version = "0.1.0"
@@ -435,10 +463,24 @@ dependencies = [
     { name = "typer" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "coverage" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "typer", specifier = ">=0.17.4" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "coverage", specifier = ">=7.4.3" },
+    { name = "pytest", specifier = ">=8.4.2" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
 ]
 
 [[package]]

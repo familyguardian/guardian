@@ -14,7 +14,7 @@ pre-commit:
     #   run: pushd guardian_daemon ; uv run --active mypy --install-types --explicit-package-bases . ; popd
     - name: daemon pytest
       glob: "guardian_daemon/**/*.py"
-      run: cd guardian_daemon && uv run pytest tests/
+      run: cd guardian_daemon && uv run pytest --cov=guardian_daemon --cov-report=term-missing --cov-report=html tests/
     - name: daemon isort
       glob: "guardian_daemon/**/*.py"
       run: uv run --package guardian_daemon isort {staged_files}

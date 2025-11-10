@@ -22,11 +22,10 @@ async def test_storage_init(storage):
     # Check that engine and tables exist
     assert storage.engine is not None
     assert storage.SessionLocal is not None
-    
+
     # Verify tables were created
-    from guardian_daemon.models import Base
     from sqlalchemy import inspect
-    
+
     inspector = inspect(storage.engine)
     table_names = inspector.get_table_names()
     assert "sessions" in table_names
@@ -78,7 +77,7 @@ async def test_end_session(storage):
         end_time=0,  # Active session
         duration_seconds=duration_seconds,
     )
-    
+
     # End the session
     end_time = start_time + timedelta(hours=1)
     await storage.end_session(username, session_id, end_time)
@@ -194,9 +193,9 @@ async def test_get_all_active_sessions(storage):
 async def test_concurrent_database_access(storage):
     """Test that concurrent database operations don't cause locking issues."""
     import asyncio
-    
+
     username = "concurrent_user"
-    
+
     # Create multiple concurrent write operations
     async def add_session_task(session_num):
         session_id = f"session_{session_num}"
@@ -209,23 +208,23 @@ async def test_concurrent_database_access(storage):
             end_time=0,
             duration_seconds=0,
         )
-    
+
     # Run 10 concurrent session additions
     tasks = [add_session_task(i) for i in range(10)]
     await asyncio.gather(*tasks)
-    
+
     # Verify all sessions were added
     sessions = storage.get_sessions_for_user(username)
     assert len(sessions) == 10
-    
+
     # Test concurrent updates
     async def update_session_task(session_num):
         session_id = f"session_{session_num}"
         storage.update_session_progress(session_id, float(session_num * 60))
-    
+
     tasks = [update_session_task(i) for i in range(10)]
     await asyncio.gather(*tasks)
-    
+
     # Verify updates completed successfully
     sessions = storage.get_sessions_for_user(username)
     assert len(sessions) == 10

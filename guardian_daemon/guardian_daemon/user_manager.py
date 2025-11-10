@@ -23,7 +23,9 @@ logger = get_logger("UserManager")
 
 class SetupError(Exception):
     """Exception raised when critical setup operations fail."""
+
     pass
+
 
 TIME_CONF_PATH = Path("/etc/security/time.conf")
 # Assumes the script is run from the project's structure, giving us the root.
@@ -43,46 +45,47 @@ def chown_recursive(path, uid, gid):
 class UserManager:
     """
     Manages user-specific configurations, PAM time rules, and systemd services.
-    
+
     This class is responsible for:
     - Managing the 'kids' group and user memberships
     - Writing and maintaining PAM time.conf rules for curfews
     - Setting up user-specific systemd services (guardian-agent)
     - Configuring D-Bus policies for agent communication
     - Ensuring PAM modules are properly configured
-    
+
     The UserManager works closely with the Policy class to enforce
     time-based access controls and user quotas.
-    
+
     Security: All methods that accept usernames validate them against path traversal
     and use canonical system paths via pwd.getpwnam().
     """
-    
+
     @staticmethod
     def validate_username(username: str) -> bool:
         """
         Validate username format to prevent path traversal and injection attacks.
-        
+
         Args:
             username: The username to validate
-            
+
         Returns:
             bool: True if username is valid, False otherwise
         """
         import re
+
         # Only allow alphanumeric characters, underscore, and hyphen
         # This prevents path traversal (../) and other injection attempts
         if not username or not isinstance(username, str):
             return False
-        return bool(re.match(r'^[a-zA-Z0-9_-]+$', username))
-    
+        return bool(re.match(r"^[a-zA-Z0-9_-]+$", username))
+
     def user_exists(self, username):
         """
         Check if a user exists on the system.
-        
+
         Args:
             username: The username to check
-            
+
         Returns:
             bool: True if user exists, False otherwise
         """
@@ -110,7 +113,11 @@ class UserManager:
             logger.info("Creating group 'kids'.")
             try:
                 subprocess.run(
-                    ["groupadd", "kids"], check=True, capture_output=True, text=True, timeout=5
+                    ["groupadd", "kids"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
             except subprocess.CalledProcessError as e:
                 error_msg = f"Failed to create group 'kids': {e.stderr}"
@@ -412,11 +419,11 @@ class UserManager:
     def __init__(self, policy: Policy = None, tracker: "SessionTracker" = None):
         """
         Initialize the UserManager with a policy instance and optionally a session tracker.
-        
+
         Args:
             policy: The Policy instance containing user rules and configurations
             tracker: The SessionTracker instance (optional, can be set later)
-        
+
         Note:
             The tracker can be set later using set_tracker() to avoid circular dependencies
             during initialization.
@@ -593,10 +600,11 @@ class UserManager:
                 logger.info(
                     f"Updating {TIME_CONF_PATH} with {len(rules)} managed rules"
                 )
-                
+
                 # Create timestamped backup before modification
                 if TIME_CONF_PATH.exists():
                     import datetime
+
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     backup_path = Path(f"{TIME_CONF_PATH}.guardian.{timestamp}.bak")
                     try:
@@ -604,17 +612,17 @@ class UserManager:
                         logger.info(f"Created time.conf backup at {backup_path}")
                     except Exception as e:
                         logger.warning(f"Failed to create backup: {e}")
-                
+
                 try:
                     # Write to temporary file first for atomic replacement
                     temp_path = Path(f"{TIME_CONF_PATH}.tmp")
                     with open(temp_path, "w") as f:
                         for line in desired_content:
                             f.write(line + "\n")
-                    
+
                     # Set permissions on temp file
                     os.chmod(temp_path, 0o644)
-                    
+
                     # Atomic rename
                     temp_path.rename(TIME_CONF_PATH)
                     logger.debug("time.conf written atomically")
@@ -858,14 +866,14 @@ class UserManager:
         Sets up the guardian_agent.service for the given user's systemd.
         Updates the service file if its checksum has changed.
         Ensures correct directory structure and permissions.
-        
+
         Security: Validates username and uses pwd.getpwnam() to prevent path traversal.
         """
         # Validate username format to prevent path traversal
         if not self.validate_username(username):
             logger.error(f"Invalid username format: {username}")
             return
-        
+
         try:
             # Get canonical user info from system - prevents path traversal
             user_info = pwd.getpwnam(username)
@@ -1023,14 +1031,14 @@ class UserManager:
         """
         Ensure that systemd user services are set up for the given user without enabling lingering.
         Only starts the service if the user is actively logged in with a session.
-        
+
         Security: Validates username and uses pwd.getpwnam() to prevent path traversal.
         """
         # Validate username format to prevent path traversal
         if not self.validate_username(username):
             logger.error(f"Invalid username format: {username}")
             return
-        
+
         try:
             # Get canonical user info from system - prevents path traversal
             user_info = pwd.getpwnam(username)
@@ -1193,7 +1201,7 @@ class UserManager:
         /etc/pam.d/sddm directly, as it's not managed by authselect.
         The correct approach is to add pam_time.so after pam_nologin.so but before
         the 'include password-auth' line to ensure it's checked before other account validations.
-        
+
         Security: Creates timestamped backups and validates PAM syntax before writing.
         """
         sddm_pam_path = Path("/etc/pam.d/sddm")
@@ -1203,11 +1211,12 @@ class UserManager:
 
         # Create timestamped backup for better traceability
         import datetime
+
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_path = Path(f"{sddm_pam_path}.guardian.{timestamp}.bak")
         # Also keep a "last known good" backup
         latest_backup_path = Path(f"{sddm_pam_path}.guardian.bak")
-        
+
         try:
             shutil.copy2(sddm_pam_path, backup_path)
             shutil.copy2(sddm_pam_path, latest_backup_path)
@@ -1300,17 +1309,17 @@ class UserManager:
                         logger.error(f"Invalid PAM type '{parts[0]}' in line: {line}")
                         logger.error("Aborting PAM modification for safety")
                         return False
-            
+
             # Write to temporary file first for atomic replacement
             temp_path = Path(f"{sddm_pam_path}.tmp")
             try:
                 with open(temp_path, "w") as f:
                     f.writelines(modified_lines)
-                
+
                 # Atomic rename
                 temp_path.rename(sddm_pam_path)
                 logger.debug("PAM configuration written atomically")
-            except Exception as e:
+            except Exception:
                 if temp_path.exists():
                     temp_path.unlink()
                 raise
