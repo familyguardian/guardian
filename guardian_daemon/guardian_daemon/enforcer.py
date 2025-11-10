@@ -180,7 +180,15 @@ class Enforcer:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await proc.communicate()
+            
+            # Use timeout to prevent hanging on slow/stuck loginctl command
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.error(f"loginctl list-sessions timed out after 10 seconds")
+                proc.kill()
+                await proc.wait()
+                return
 
             if proc.returncode != 0:
                 logger.error(f"loginctl list-sessions failed: {stderr.decode()}")
@@ -229,7 +237,18 @@ class Enforcer:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                     )
-                    _, stderr = await proc.communicate()
+                    
+                    # Use timeout to prevent hanging
+                    try:
+                        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+                    except asyncio.TimeoutError:
+                        logger.error(
+                            f"loginctl terminate-session {session_id} timed out after 10 seconds"
+                        )
+                        proc.kill()
+                        await proc.wait()
+                        continue
+                    
                     if proc.returncode == 0:
                         logger.info(
                             f"Successfully terminated desktop session {session_id} for user {username}."
@@ -238,6 +257,9 @@ class Enforcer:
                         logger.error(
                             f"Failed to terminate session {session_id} for user {username}: {stderr.decode()}"
                         )
+                except asyncio.TimeoutError:
+                    # Already handled above
+                    pass
                 except Exception as e:
                     logger.error(
                         f"Exception while terminating session {session_id} for user {username}: {e}"
