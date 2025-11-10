@@ -204,20 +204,22 @@ except subprocess.CalledProcessError as e:
 
 **Recommendation:** Raise exceptions for critical failures. Implement health checks on daemon startup.
 
-**MAJOR: No Timeout on Subprocess Calls**
-```python
-# enforcer.py, line ~155
-proc = await asyncio.create_subprocess_exec(
-    "loginctl", "list-sessions", "--no-legend",
-    stdout=asyncio.subprocess.PIPE,
-    stderr=asyncio.subprocess.PIPE,
-)
-stdout, stderr = await proc.communicate()  # No timeout!
-```
+**✅ MAJOR: No Timeout on Subprocess Calls** *(RESOLVED - Commit b42cc58)*
 
-**Issue:** External command execution has no timeout. A hung process could block the daemon indefinitely.
+**Original Issue:** External command execution had no timeout. A hung process could block the daemon indefinitely.
 
-**Recommendation:** Use `asyncio.wait_for()` with reasonable timeout (e.g., 5-10 seconds).
+**Resolution:**
+- Added `asyncio.wait_for()` with 10-second timeout to all async subprocess calls
+- Affected commands:
+  - `loginctl list-sessions` in enforcer.py
+  - `loginctl terminate-session` in enforcer.py  
+  - `systemctl daemon-reload` in systemd_manager.py
+- Proper error handling: log error, kill process, wait for cleanup
+- Created `test_subprocess_timeouts.py` with 4 test cases covering:
+  - Timeout scenarios for each command
+  - Normal execution paths
+  - Proper cleanup verification
+- All tests passing
 
 **MAJOR: Enforcer Can Be Triggered Multiple Times**
 ```python
