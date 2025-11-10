@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 from guardian_daemon.logging import get_logger
-from guardian_daemon.models import Base, History, Meta, Session, UserSettings
+from guardian_daemon.models import History, Meta, Session, UserSettings
 
 logger = get_logger("Storage")
 
@@ -88,12 +88,52 @@ class Storage:
 
     def _init_db(self):
         """
-        Initialize the SQLite database schema if not present.
-        Uses Alembic migrations in production, but creates tables directly for simplicity.
+        Initialize the SQLite database schema using Alembic migrations.
+        Runs all pending migrations, sets SQLite pragmas, and initializes default values.
         """
         try:
-            # Create all tables
-            Base.metadata.create_all(self.engine)
+            # Run Alembic migrations programmatically
+            import os
+
+            from alembic import command
+            from alembic.config import Config
+
+            # Get the alembic.ini path (relative to this file's directory)
+            daemon_dir = os.path.dirname(os.path.dirname(__file__))
+            alembic_ini_path = os.path.join(daemon_dir, "alembic.ini")
+
+            # Create Alembic config
+            alembic_cfg = Config(alembic_ini_path)
+
+            # Set the DB_PATH environment variable so env.py picks it up
+            # env.py uses get_url() which reads from DB_PATH environment variable
+            old_db_path = os.environ.get("DB_PATH")
+            os.environ["DB_PATH"] = self.db_path
+
+            try:
+                # Run migrations to latest revision
+                command.upgrade(alembic_cfg, "head")
+                logger.info("Database migrations completed successfully")
+            finally:
+                # Restore original DB_PATH
+                if old_db_path is None:
+                    os.environ.pop("DB_PATH", None)
+                else:
+                    os.environ["DB_PATH"] = old_db_path
+
+            # Dispose and recreate engine to ensure migration changes are visible
+            # This is important for SQLite to ensure all changes are flushed
+            self.engine.dispose()
+            self.engine = create_engine(
+                f"sqlite:///{self.db_path}",
+                echo=False,
+                poolclass=NullPool,
+                connect_args={
+                    "check_same_thread": False,
+                    "timeout": 30,
+                },
+            )
+            self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
 
             # Set SQLite pragmas
             with self.engine.connect() as conn:
