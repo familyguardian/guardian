@@ -13,6 +13,7 @@ from typing import Optional
 
 from sqlalchemy import create_engine, select, update, delete, and_, or_, func
 from sqlalchemy.orm import sessionmaker, Session as SQLSession
+from sqlalchemy.pool import StaticPool
 
 from guardian_daemon.logging import get_logger
 from guardian_daemon.models import Base, Session, UserSettings, Meta, History
@@ -65,11 +66,17 @@ class Storage:
         if parent_dir and not os.path.exists(parent_dir):
             os.makedirs(parent_dir)
         
-        # Create SQLAlchemy engine
+        # Create SQLAlchemy engine with proper SQLite configuration
+        # StaticPool: maintains a single connection for all threads (safe for SQLite)
+        # This prevents "database is locked" errors and ensures thread-safety
         self.engine = create_engine(
             f"sqlite:///{self.db_path}",
             echo=False,
-            connect_args={"check_same_thread": False}
+            poolclass=StaticPool,
+            connect_args={
+                "check_same_thread": False,
+                "timeout": 30  # 30 second timeout for lock acquisition
+            }
         )
         
         # Create session factory

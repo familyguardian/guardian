@@ -188,3 +188,44 @@ async def test_get_all_active_sessions(storage):
     # Verify session count updated
     active_sessions = await storage.get_all_active_sessions()
     assert len(active_sessions) == 2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_database_access(storage):
+    """Test that concurrent database operations don't cause locking issues."""
+    import asyncio
+    
+    username = "concurrent_user"
+    
+    # Create multiple concurrent write operations
+    async def add_session_task(session_num):
+        session_id = f"session_{session_num}"
+        start_time = datetime.now()
+        await storage.add_session(
+            session_id=session_id,
+            username=username,
+            uid=1000,
+            start_time=start_time.timestamp(),
+            end_time=0,
+            duration_seconds=0,
+        )
+    
+    # Run 10 concurrent session additions
+    tasks = [add_session_task(i) for i in range(10)]
+    await asyncio.gather(*tasks)
+    
+    # Verify all sessions were added
+    sessions = storage.get_sessions_for_user(username)
+    assert len(sessions) == 10
+    
+    # Test concurrent updates
+    async def update_session_task(session_num):
+        session_id = f"session_{session_num}"
+        storage.update_session_progress(session_id, float(session_num * 60))
+    
+    tasks = [update_session_task(i) for i in range(10)]
+    await asyncio.gather(*tasks)
+    
+    # Verify updates completed successfully
+    sessions = storage.get_sessions_for_user(username)
+    assert len(sessions) == 10
