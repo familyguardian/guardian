@@ -366,7 +366,7 @@ dev = [{ name = "types-psutil", specifier = ">=7.0.0.20250822" }]
 [[package]]
 name = "guardian-daemon"
 version = "0.1.0"
-source = { virtual = "guardian_daemon" }
+source = { editable = "guardian_daemon" }
 dependencies = [
     { name = "alembic" },
     { name = "dbus-next" },
