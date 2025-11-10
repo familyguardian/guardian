@@ -192,17 +192,26 @@ async with self.session_lock:
 - Created `test_config.py` with 10 comprehensive test cases
 - All tests passing
 
-**MAJOR: Silent Failures in User Setup**
-```python
-# user_manager.py, line ~88
-except subprocess.CalledProcessError as e:
-    logger.error(f"Failed to create group 'kids': {e.stderr}")
-    return  # Silently continues!
-```
+**✅ MAJOR: Silent Failures in User Setup** *(RESOLVED - Commit 8c7d7b1)*
 
-**Issue:** Critical setup failures (group creation, PAM configuration) are logged but execution continues. This can lead to non-functional system state.
+**Original Issue:** Critical setup failures (group creation, PAM configuration) were logged but execution continued, leading to non-functional system state.
 
-**Recommendation:** Raise exceptions for critical failures. Implement health checks on daemon startup.
+**Resolution:**
+- Created `SetupError` exception class for critical setup failures
+- Modified critical setup methods to raise SetupError instead of silently returning:
+  - `ensure_kids_group()`: Raises on group creation failure or timeout
+  - `ensure_pam_time_module()`: Raises if authselect not found
+  - `ensure_pam_time_module()`: Raises if custom profile broken
+- Added 5-second timeout to groupadd subprocess call
+- Updated main() entry point to catch SetupError and exit with code 1
+- Added detailed error messages explaining what went wrong
+- System admin now gets immediate feedback on setup failures
+- Created `test_setup_errors.py` with 6 test cases covering:
+  - Group creation failures and timeouts
+  - Missing system dependencies
+  - Exception propagation to main
+  - Proper exit codes
+- All tests passing
 
 **✅ MAJOR: No Timeout on Subprocess Calls** *(RESOLVED - Commit b42cc58)*
 
