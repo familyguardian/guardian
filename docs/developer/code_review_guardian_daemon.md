@@ -171,22 +171,26 @@ async with self.session_lock:
 
 ### 2.2 ⚠️ Major Issues
 
-**MAJOR: Insufficient Input Validation**
-```python
-# config.py, line ~143
-def _validate_config(self):
-    if not isinstance(self.data.get("logging"), dict):
-        raise ConfigError("'logging' section is missing or not a dictionary.")
-    # ... minimal validation only
-```
+**✅ MAJOR: Insufficient Input Validation** *(RESOLVED - Commit 275b4ac)*
 
-**Issue:** Configuration validation is minimal. Missing checks for:
+**Original Issue:** Configuration validation was minimal. Missing checks for:
 - Valid time formats (HH:MM)
 - Quota values (positive integers)
 - User existence on system
 - Path permissions
 
-**Recommendation:** Implement comprehensive schema validation using `pydantic` or `cerberus`.
+**Resolution:**
+- Added comprehensive validation to `_validate_config()` method
+- Implemented `_validate_time_format()` helper with regex pattern (HH:MM)
+- Implemented `_validate_positive_integer()` helper with optional zero support
+- Added validation for:
+  - Log level against allowed values
+  - Time formats for reset_time and curfew windows
+  - Positive integers for quotas (daily, weekly, monthly)
+  - Non-negative integers for grace_minutes
+- Added detailed error messages for each validation failure
+- Created `test_config.py` with 10 comprehensive test cases
+- All tests passing
 
 **MAJOR: Silent Failures in User Setup**
 ```python
