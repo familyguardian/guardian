@@ -382,8 +382,8 @@ class SessionTracker:
                             f"current_duration={duration/60:.1f} minutes"
                         )
 
-                        # Ensure we always update the database with the latest duration
-                        # This is crucial for preserving time across daemon restarts
+                        # CRITICAL FIX: Keep database update within the lock to prevent race conditions
+                        # This ensures atomicity between reading session state and writing to database
                         self.storage.update_session_progress(session_id, duration)
 
                         # Log more detailed information at info level if significant time has passed

@@ -73,19 +73,40 @@ The `GuardianDaemon` class in `__main__.py` manually wires all components togeth
 
 ### 2.1 ❌ Critical Issues
 
-**CRITICAL: Unhandled D-Bus Disconnections**
+**CRITICAL: Unhandled D-Bus Disconnections** ✅ **FIXED**
 ```python
-# sessions.py, line ~270+
+# sessions.py - FIXED in commit e610de7
+async def _get_dbus_connection(self):
+    """Get or create a D-Bus connection with retry logic."""
+    max_retries = 3
+    retry_delay = 2.0
+    for attempt in range(max_retries):
+        try:
+            bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+            # ... connection setup with retry logic
+            return bus, manager
+        except Exception as e:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+
 async def periodic_session_update(self, interval: int = 60):
-    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-    # ... bus connection is created once
+    bus = None
+    manager = None
     while True:
-        # If bus disconnects, entire loop crashes
+        try:
+            if bus is None or manager is None:
+                bus, manager = await self._get_dbus_connection()
+            # ... with auto-reconnection on errors
 ```
 
 **Issue:** D-Bus connection is established once at the start of the loop. If the system D-Bus daemon restarts or connection drops, the entire daemon could crash or hang.
 
-**Recommendation:** Wrap D-Bus calls in try-except blocks with exponential backoff retry logic. Implement connection health checks.
+**Resolution:**
+- ✅ Added `_get_dbus_connection()` with 3 retries and exponential backoff
+- ✅ Connection health checking in main loop
+- ✅ Auto-reconnect on D-Bus errors (detect "dbus" or "disconnect" in error messages)
+- ✅ Proper error logging with stack traces for debugging
 
 **CRITICAL: Database Connection Not Pooled** ✅ **FIXED**
 ```python
