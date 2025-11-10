@@ -581,12 +581,31 @@ class UserManager:
                 logger.info(
                     f"Updating {TIME_CONF_PATH} with {len(rules)} managed rules"
                 )
+                
+                # Create timestamped backup before modification
+                if TIME_CONF_PATH.exists():
+                    import datetime
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    backup_path = Path(f"{TIME_CONF_PATH}.guardian.{timestamp}.bak")
+                    try:
+                        shutil.copy2(TIME_CONF_PATH, backup_path)
+                        logger.info(f"Created time.conf backup at {backup_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to create backup: {e}")
+                
                 try:
-                    # Write the new content
-                    with open(TIME_CONF_PATH, "w") as f:
+                    # Write to temporary file first for atomic replacement
+                    temp_path = Path(f"{TIME_CONF_PATH}.tmp")
+                    with open(temp_path, "w") as f:
                         for line in desired_content:
                             f.write(line + "\n")
-                    os.chmod(TIME_CONF_PATH, 0o644)
+                    
+                    # Set permissions on temp file
+                    os.chmod(temp_path, 0o644)
+                    
+                    # Atomic rename
+                    temp_path.rename(TIME_CONF_PATH)
+                    logger.debug("time.conf written atomically")
 
                     # Reload PAM configuration if the system supports it
                     try:
@@ -1162,21 +1181,29 @@ class UserManager:
         /etc/pam.d/sddm directly, as it's not managed by authselect.
         The correct approach is to add pam_time.so after pam_nologin.so but before
         the 'include password-auth' line to ensure it's checked before other account validations.
+        
+        Security: Creates timestamped backups and validates PAM syntax before writing.
         """
         sddm_pam_path = Path("/etc/pam.d/sddm")
         if not sddm_pam_path.exists():
             logger.warning("SDDM PAM configuration not found, skipping SDDM PAM fix.")
             return False
 
-        # Create a backup if it doesn't already exist
-        backup_path = Path(f"{sddm_pam_path}.guardian.bak")
-        if not backup_path.exists():
-            try:
-                shutil.copy2(sddm_pam_path, backup_path)
-                logger.info(f"Created backup of SDDM PAM config at {backup_path}")
-            except Exception as e:
-                logger.error(f"Failed to create SDDM PAM config backup: {e}")
-                return False
+        # Create timestamped backup for better traceability
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = Path(f"{sddm_pam_path}.guardian.{timestamp}.bak")
+        # Also keep a "last known good" backup
+        latest_backup_path = Path(f"{sddm_pam_path}.guardian.bak")
+        
+        try:
+            shutil.copy2(sddm_pam_path, backup_path)
+            shutil.copy2(sddm_pam_path, latest_backup_path)
+            logger.info(f"Created PAM backup at {backup_path}")
+        except Exception as e:
+            logger.error(f"Failed to create SDDM PAM config backup: {e}")
+            logger.error("Aborting PAM modification for safety")
+            return False
 
         try:
             # Read the current configuration
@@ -1245,9 +1272,36 @@ class UserManager:
                 )
                 return False
 
-            # Write the modified configuration
-            with open(sddm_pam_path, "w") as f:
-                f.writelines(modified_lines)
+            # Basic PAM syntax validation before writing
+            # Ensure all account lines have proper format: type control module [args]
+            for line in modified_lines:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#"):
+                    parts = stripped.split()
+                    if len(parts) < 3:
+                        logger.error(f"Invalid PAM syntax in line: {line}")
+                        logger.error("Aborting PAM modification for safety")
+                        return False
+                    # Validate type is one of: auth, account, password, session
+                    valid_types = ["auth", "account", "password", "session"]
+                    if parts[0] not in valid_types:
+                        logger.error(f"Invalid PAM type '{parts[0]}' in line: {line}")
+                        logger.error("Aborting PAM modification for safety")
+                        return False
+            
+            # Write to temporary file first for atomic replacement
+            temp_path = Path(f"{sddm_pam_path}.tmp")
+            try:
+                with open(temp_path, "w") as f:
+                    f.writelines(modified_lines)
+                
+                # Atomic rename
+                temp_path.rename(sddm_pam_path)
+                logger.debug("PAM configuration written atomically")
+            except Exception as e:
+                if temp_path.exists():
+                    temp_path.unlink()
+                raise
 
             # Read back and log the modified content
             with open(sddm_pam_path, "r") as f:

@@ -252,16 +252,38 @@ self.server = await asyncio.start_unix_server(
 
 ### 3.1 🔐 Critical Security Issues
 
-**CRITICAL: Path Traversal in User Manager**
+**CRITICAL: Path Traversal in User Manager** ✅ **FIXED**
 ```python
-# user_manager.py, line ~822
-user_home = Path(f"~{username}").expanduser()
-config_dir = user_home / ".config"
+# user_manager.py - FIXED in commit 8485837
+@staticmethod
+def validate_username(username: str) -> bool:
+    """Validate username to prevent path traversal and injection."""
+    if not username or not isinstance(username, str):
+        return False
+    # Only allow alphanumeric, underscore, and hyphen
+    return bool(re.match(r'^[a-zA-Z0-9_-]+$', username))
+
+def setup_user_service(self, username: str):
+    # Validate username format to prevent path traversal
+    if not self.validate_username(username):
+        logger.error(f"Invalid username format: {username}")
+        return
+    
+    # Get canonical user info from system
+    user_info = pwd.getpwnam(username)
+    user_home = Path(user_info.pw_dir)  # Canonical path
 ```
 
 **Issue:** Username from configuration is used directly in path construction without validation. Malicious config could create files outside user home.
 
-**Recommendation:** Validate username against system users before path construction. Use `pwd.getpwnam()` to get canonical home directory.
+**Resolution:**
+- ✅ Added `validate_username()` static method with strict regex validation
+- ✅ Blocks path traversal (../, ..%2F, etc.)
+- ✅ Blocks command injection (;|&$`, etc.)
+- ✅ Only allows: alphanumeric, underscore, hyphen
+- ✅ Already using `pwd.getpwnam()` for canonical home directory
+- ✅ Added comprehensive test suite (140+ test cases)
+- ✅ Applied to all methods accepting usernames
 
 **CRITICAL: PAM Configuration Modification**
 ```python
