@@ -38,10 +38,20 @@ class Enforcer:
         # Minimum time between similar notifications in seconds
         self._notification_cooldown = 300  # 5 minutes
         self._grace_period_users = set()
+        # Track last enforcement check per user to avoid redundant checks
+        # Format: {username: (timestamp, remaining_time_at_check)}
+        self._last_enforcement_check: Dict[str, Tuple[float, float]] = {}
+        # Minimum time between enforcement checks in seconds
+        # Only re-check if 30 seconds passed OR remaining time changed significantly
+        self._enforcement_check_interval = 30
 
     async def enforce_user(self, username):
         """
         Checks quota and curfew for a user and enforces actions if necessary.
+
+        Uses intelligent throttling to avoid redundant enforcement checks:
+        - Skips check if user is already in grace period
+        - Skips check if last check was recent and time hasn't changed much
         """
         if username in self._grace_period_users:
             logger.debug(
@@ -49,8 +59,35 @@ class Enforcer:
             )
             return
 
-        logger.info(f"Enforcing quota/curfew for user: {username}")
+        # Check if we should skip this enforcement check to reduce overhead
+        now = time.time()
         remaining_time = await self.tracker.get_remaining_time(username)
+
+        if username in self._last_enforcement_check:
+            last_check_time, last_remaining_time = self._last_enforcement_check[
+                username
+            ]
+            time_since_check = now - last_check_time
+            remaining_time_change = abs(remaining_time - last_remaining_time)
+
+            # Skip check if:
+            # 1. Less than 30 seconds since last check AND
+            # 2. Remaining time hasn't changed by more than 1 minute
+            if (
+                time_since_check < self._enforcement_check_interval
+                and remaining_time_change < 1.0
+            ):
+                logger.debug(
+                    f"Skipping redundant enforcement check for {username} "
+                    f"(last check {time_since_check:.1f}s ago, "
+                    f"time change: {remaining_time_change:.2f} min)"
+                )
+                return
+
+        # Record this enforcement check
+        self._last_enforcement_check[username] = (now, remaining_time)
+
+        logger.info(f"Enforcing quota/curfew for user: {username}")
         total_time = await self.tracker.get_total_time(username)
 
         if remaining_time <= 0:
@@ -180,12 +217,14 @@ class Enforcer:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            
+
             # Use timeout to prevent hanging on slow/stuck loginctl command
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=10.0
+                )
             except asyncio.TimeoutError:
-                logger.error(f"loginctl list-sessions timed out after 10 seconds")
+                logger.error("loginctl list-sessions timed out after 10 seconds")
                 proc.kill()
                 await proc.wait()
                 return
@@ -237,10 +276,12 @@ class Enforcer:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                     )
-                    
+
                     # Use timeout to prevent hanging
                     try:
-                        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+                        _, stderr = await asyncio.wait_for(
+                            proc.communicate(), timeout=10.0
+                        )
                     except asyncio.TimeoutError:
                         logger.error(
                             f"loginctl terminate-session {session_id} timed out after 10 seconds"
@@ -248,7 +289,7 @@ class Enforcer:
                         proc.kill()
                         await proc.wait()
                         continue
-                    
+
                     if proc.returncode == 0:
                         logger.info(
                             f"Successfully terminated desktop session {session_id} for user {username}."
