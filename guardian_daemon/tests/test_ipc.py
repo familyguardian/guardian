@@ -41,7 +41,7 @@ def test_check_rate_limit_allows_normal_usage(ipc_server):
 
     # Should allow first 100 requests
     for i in range(100):
-        assert ipc_server._check_rate_limit(uid), f"Request {i+1} should be allowed"
+        assert ipc_server._check_rate_limit(uid), f"Request {i + 1} should be allowed"
 
 
 def test_check_rate_limit_blocks_excessive_requests(ipc_server):

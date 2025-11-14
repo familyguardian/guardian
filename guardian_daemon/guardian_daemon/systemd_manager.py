@@ -139,10 +139,12 @@ WantedBy=timers.target
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            
+
             # Use timeout to prevent hanging on slow/stuck systemctl command
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=10.0
+                )
             except asyncio.TimeoutError:
                 logger.error("systemctl daemon-reload timed out after 10 seconds")
                 proc.kill()

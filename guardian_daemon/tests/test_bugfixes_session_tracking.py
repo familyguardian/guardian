@@ -100,8 +100,14 @@ class TestBug2_DBusUserProperty:
                     "session_tuple", 1001, "test_quota_only", props
                 )
 
-                # Verify session was tracked
-                assert "session_tuple" in tracker.active_sessions
+                # Verify session was tracked (now uses unique session ID with boot_id prefix)
+                boot_id_prefix = tracker.boot_id[:8]
+                unique_session_id = f"{boot_id_prefix}_session_tuple"
+                assert unique_session_id in tracker.active_sessions
+                assert (
+                    tracker.active_sessions[unique_session_id]["logind_session_id"]
+                    == "session_tuple"
+                )
 
     @pytest.mark.asyncio
     async def test_user_property_integer_handling(self, test_fixtures):
@@ -123,8 +129,14 @@ class TestBug2_DBusUserProperty:
                     "session_int", 1001, "test_quota_only", props
                 )
 
-                # Verify session was tracked
-                assert "session_int" in tracker.active_sessions
+                # Verify session was tracked (now uses unique session ID with boot_id prefix)
+                boot_id_prefix = tracker.boot_id[:8]
+                unique_session_id = f"{boot_id_prefix}_session_int"
+                assert unique_session_id in tracker.active_sessions
+                assert (
+                    tracker.active_sessions[unique_session_id]["logind_session_id"]
+                    == "session_int"
+                )
 
 
 class TestBug3_AsyncAwait:
@@ -367,5 +379,11 @@ class TestBug7_BackgroundSessionFiltering:
                     "user_session", 1001, "test_quota_only", props
                 )
 
-                # User session SHOULD be added
-                assert "user_session" in tracker.active_sessions
+                # User session SHOULD be added (now uses unique session ID with boot_id prefix)
+                boot_id_prefix = tracker.boot_id[:8]
+                unique_session_id = f"{boot_id_prefix}_user_session"
+                assert unique_session_id in tracker.active_sessions
+                assert (
+                    tracker.active_sessions[unique_session_id]["logind_session_id"]
+                    == "user_session"
+                )

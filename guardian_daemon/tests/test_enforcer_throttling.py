@@ -66,11 +66,13 @@ async def test_enforce_user_skips_redundant_check(mock_policy, mock_tracker):
 
     # First check
     await enforcer.enforce_user("testuser")
-    
+
     # Second check immediately after (within 30 seconds, same remaining time)
     mock_tracker.get_remaining_time.reset_mock()
     mock_tracker.get_total_time.reset_mock()
-    await enforcer.enforce_user("testuser")    # Should be skipped - get_remaining_time called once for check, but not get_total_time
+    await enforcer.enforce_user(
+        "testuser"
+    )  # Should be skipped - get_remaining_time called once for check, but not get_total_time
     assert mock_tracker.get_remaining_time.call_count == 1
     mock_tracker.get_total_time.assert_not_called()
 

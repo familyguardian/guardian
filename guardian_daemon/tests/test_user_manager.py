@@ -2,8 +2,9 @@
 Unit tests for the user_manager module of guardian_daemon.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 
 from guardian_daemon.user_manager import UserManager
 
@@ -13,7 +14,7 @@ def user_manager(test_config):
     """Fixture to provide a UserManager instance."""
     config, config_path = test_config
     from guardian_daemon.policy import Policy
-    
+
     policy = Policy(config_path)
     return UserManager(policy)
 
@@ -29,7 +30,7 @@ def test_validate_username_valid():
         "a",
         "abc123_test-user",
     ]
-    
+
     for username in valid_usernames:
         assert UserManager.validate_username(username), f"'{username}' should be valid"
 
@@ -56,9 +57,11 @@ def test_validate_username_invalid():
         123,  # Not a string
         [],  # Not a string
     ]
-    
+
     for username in invalid_usernames:
-        assert not UserManager.validate_username(username), f"'{username}' should be invalid"
+        assert not UserManager.validate_username(
+            username
+        ), f"'{username}' should be invalid"
 
 
 def test_user_exists_with_invalid_username(user_manager):
@@ -69,39 +72,43 @@ def test_user_exists_with_invalid_username(user_manager):
     assert not user_manager.user_exists(None)
 
 
-@patch('guardian_daemon.user_manager.pwd.getpwnam')
+@patch("guardian_daemon.user_manager.pwd.getpwnam")
 def test_user_exists_with_valid_username(mock_getpwnam, user_manager):
     """Test that user_exists works correctly with valid usernames."""
     # Mock user exists
     mock_getpwnam.return_value = Mock(pw_uid=1000, pw_gid=1000, pw_dir="/home/testuser")
     assert user_manager.user_exists("testuser")
-    
+
     # Mock user doesn't exist
     mock_getpwnam.side_effect = KeyError()
     assert not user_manager.user_exists("nonexistent")
 
 
-@patch('guardian_daemon.user_manager.pwd.getpwnam')
-@patch('guardian_daemon.user_manager.Path')
-@patch('guardian_daemon.user_manager.SOURCE_SERVICE_FILE')
-def test_setup_user_service_validates_username(mock_source, mock_path, mock_getpwnam, user_manager):
+@patch("guardian_daemon.user_manager.pwd.getpwnam")
+@patch("guardian_daemon.user_manager.Path")
+@patch("guardian_daemon.user_manager.SOURCE_SERVICE_FILE")
+def test_setup_user_service_validates_username(
+    mock_source, mock_path, mock_getpwnam, user_manager
+):
     """Test that setup_user_service rejects invalid usernames."""
     # setup_user_service should reject invalid usernames before calling getpwnam
     user_manager.setup_user_service("../etc/passwd")
     mock_getpwnam.assert_not_called()
-    
+
     user_manager.setup_user_service("user;rm -rf /")
     mock_getpwnam.assert_not_called()
 
 
-@patch('guardian_daemon.user_manager.pwd.getpwnam')
-@patch('guardian_daemon.user_manager.subprocess.run')
-def test_ensure_systemd_user_service_validates_username(mock_run, mock_getpwnam, user_manager):
+@patch("guardian_daemon.user_manager.pwd.getpwnam")
+@patch("guardian_daemon.user_manager.subprocess.run")
+def test_ensure_systemd_user_service_validates_username(
+    mock_run, mock_getpwnam, user_manager
+):
     """Test that ensure_systemd_user_service rejects invalid usernames."""
     # Should reject invalid usernames before calling getpwnam
     user_manager.ensure_systemd_user_service("../etc/passwd")
     mock_getpwnam.assert_not_called()
-    
+
     user_manager.ensure_systemd_user_service("user;rm -rf /")
     mock_getpwnam.assert_not_called()
 
@@ -115,9 +122,11 @@ def test_path_traversal_prevention():
         "./../..",
         "../../root/.ssh/id_rsa",
     ]
-    
+
     for attempt in path_traversal_attempts:
-        assert not UserManager.validate_username(attempt), f"Path traversal blocked: {attempt}"
+        assert not UserManager.validate_username(
+            attempt
+        ), f"Path traversal blocked: {attempt}"
 
 
 def test_command_injection_prevention():
@@ -132,6 +141,8 @@ def test_command_injection_prevention():
         "user$(whoami)",
         "user${IFS}cat${IFS}/etc/passwd",
     ]
-    
+
     for attempt in injection_attempts:
-        assert not UserManager.validate_username(attempt), f"Command injection blocked: {attempt}"
+        assert not UserManager.validate_username(
+            attempt
+        ), f"Command injection blocked: {attempt}"

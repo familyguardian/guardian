@@ -20,20 +20,20 @@ class ConfigError(Exception):
 class Config:
     """
     Handles loading, merging, and validating the daemon's configuration.
-    
+
     Configuration Loading Priority (highest to lowest):
     1. Explicitly provided path via config_path parameter
     2. Environment variable GUARDIAN_DAEMON_CONFIG
     3. System-wide config at /etc/guardian/daemon/config.yaml
     4. Local config (development) in project directory
-    
+
     The configuration system uses a two-layer approach:
     - Default configuration (always loaded from default-config.yaml)
     - User configuration (merged on top of defaults)
-    
+
     This ensures that all required keys exist even if the user
     config is minimal or missing.
-    
+
     Example:
         >>> config = Config("/etc/guardian/daemon/config.yaml")
         >>> db_path = config.get("db_path")
@@ -43,14 +43,14 @@ class Config:
     def __init__(self, config_path=None):
         """
         Initialize the configuration system.
-        
+
         Args:
             config_path: Optional explicit path to configuration file.
                         If not provided, searches in priority order:
                         1. GUARDIAN_DAEMON_CONFIG env var
                         2. /etc/guardian/daemon/config.yaml
                         3. Local config.yaml (development)
-        
+
         Raises:
             ConfigError: If configuration validation fails
         """
@@ -120,13 +120,13 @@ class Config:
     def _load_config(self, path):
         """
         Loads a YAML configuration file.
-        
+
         Args:
             path: Path to the YAML file
-            
+
         Returns:
             dict: Parsed configuration data, or empty dict if file doesn't exist
-            
+
         Raises:
             ConfigError: If YAML parsing fails or file cannot be read
         """
@@ -145,11 +145,11 @@ class Config:
     def _merge_configs(self, base, override):
         """
         Recursively merges the override config into the base config.
-        
+
         Args:
             base: Base configuration dictionary (modified in place)
             override: Configuration dictionary to merge in (takes priority)
-            
+
         Note:
             Dictionaries are merged recursively, all other types override.
         """
@@ -163,18 +163,23 @@ class Config:
     def _validate_time_format(time_str: str, field_name: str) -> None:
         """Validate HH:MM time format."""
         import re
+
         if not isinstance(time_str, str):
             raise ConfigError(f"'{field_name}' must be a string")
-        if not re.match(r'^(2[0-3]|[01]?[0-9]):([0-5][0-9])$', time_str):
+        if not re.match(r"^(2[0-3]|[01]?[0-9]):([0-5][0-9])$", time_str):
             raise ConfigError(
                 f"'{field_name}' has invalid time format: '{time_str}'. Expected HH:MM (00:00-23:59)"
             )
-    
+
     @staticmethod
-    def _validate_positive_integer(value: any, field_name: str, allow_zero: bool = False) -> None:
+    def _validate_positive_integer(
+        value: any, field_name: str, allow_zero: bool = False
+    ) -> None:
         """Validate that value is a positive integer."""
         if not isinstance(value, int):
-            raise ConfigError(f"'{field_name}' must be an integer, got {type(value).__name__}")
+            raise ConfigError(
+                f"'{field_name}' must be an integer, got {type(value).__name__}"
+            )
         if allow_zero:
             if value < 0:
                 raise ConfigError(f"'{field_name}' must be non-negative, got {value}")
@@ -190,7 +195,7 @@ class Config:
         # Validate logging section
         if not isinstance(self.data.get("logging"), dict):
             raise ConfigError("'logging' section is missing or not a dictionary.")
-        
+
         logging_cfg = self.data.get("logging", {})
         valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         if "level" in logging_cfg:
@@ -199,71 +204,86 @@ class Config:
                     f"Invalid log level: '{logging_cfg['level']}'. "
                     f"Must be one of: {', '.join(valid_log_levels)}"
                 )
-        
+
         # Validate paths
         if not isinstance(self.data.get("db_path"), str):
             raise ConfigError("'db_path' is missing or not a string.")
         if not isinstance(self.data.get("ipc_socket"), str):
             raise ConfigError("'ipc_socket' is missing or not a string.")
-        
+
         # Validate reset_time format
         if "reset_time" in self.data:
             self._validate_time_format(self.data["reset_time"], "reset_time")
-        
+
         # Validate users section
         users = self.data.get("users")
         if users is not None:
             if not isinstance(users, dict):
                 raise ConfigError("'users' section must be a dictionary.")
-            
+
             # Validate each user's configuration
             for username, user_config in users.items():
                 if not isinstance(user_config, dict):
-                    raise ConfigError(f"Configuration for user '{username}' must be a dictionary.")
-                
+                    raise ConfigError(
+                        f"Configuration for user '{username}' must be a dictionary."
+                    )
+
                 # Validate quota if present
                 if "quota" in user_config:
                     quota = user_config["quota"]
                     if not isinstance(quota, dict):
                         raise ConfigError(f"'{username}.quota' must be a dictionary.")
-                    
+
                     if "daily" in quota:
-                        self._validate_positive_integer(quota["daily"], f"{username}.quota.daily", allow_zero=True)
+                        self._validate_positive_integer(
+                            quota["daily"], f"{username}.quota.daily", allow_zero=True
+                        )
                     if "weekly" in quota:
-                        self._validate_positive_integer(quota["weekly"], f"{username}.quota.weekly", allow_zero=True)
-                
+                        self._validate_positive_integer(
+                            quota["weekly"], f"{username}.quota.weekly", allow_zero=True
+                        )
+
                 # Validate curfew if present
                 if "curfew" in user_config:
                     curfew = user_config["curfew"]
                     if not isinstance(curfew, dict):
                         raise ConfigError(f"'{username}.curfew' must be a dictionary.")
-                    
+
                     # Validate curfew time windows
                     for period in ["weekday", "weekend"]:
                         if period in curfew:
                             period_cfg = curfew[period]
                             if not isinstance(period_cfg, dict):
-                                raise ConfigError(f"'{username}.curfew.{period}' must be a dictionary.")
-                            
+                                raise ConfigError(
+                                    f"'{username}.curfew.{period}' must be a dictionary."
+                                )
+
                             if "start" in period_cfg:
-                                self._validate_time_format(period_cfg["start"], f"{username}.curfew.{period}.start")
+                                self._validate_time_format(
+                                    period_cfg["start"],
+                                    f"{username}.curfew.{period}.start",
+                                )
                             if "end" in period_cfg:
-                                self._validate_time_format(period_cfg["end"], f"{username}.curfew.{period}.end")
-                
+                                self._validate_time_format(
+                                    period_cfg["end"], f"{username}.curfew.{period}.end"
+                                )
+
                 # Validate grace_minutes if present
                 if "grace_minutes" in user_config:
-                    self._validate_positive_integer(user_config["grace_minutes"], f"{username}.grace_minutes")
+                    self._validate_positive_integer(
+                        user_config["grace_minutes"], f"{username}.grace_minutes"
+                    )
 
         logger.debug("Configuration validation passed.")
 
     def get(self, key, default=None):
         """
         Gets a configuration value.
-        
+
         Args:
             key: Configuration key to retrieve
             default: Default value if key not found
-            
+
         Returns:
             The configuration value or default
         """
@@ -272,13 +292,13 @@ class Config:
     def __getitem__(self, key):
         """
         Allows dictionary-style access to config data.
-        
+
         Args:
             key: Configuration key to retrieve
-            
+
         Returns:
             The configuration value
-            
+
         Raises:
             KeyError: If key doesn't exist
         """

@@ -13,7 +13,6 @@ logger = get_logger("Policy")
 
 
 class Policy:
-
     def __init__(
         self, config_path: Optional[str] = None, db_path: Optional[str] = None
     ):

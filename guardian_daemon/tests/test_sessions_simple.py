@@ -346,7 +346,9 @@ def test_handle_name_owner_changed_invalid_format(session_tracker):
     """Test _handle_name_owner_changed handles invalid names gracefully."""
     # Name with too few parts should be handled gracefully
     session_tracker._handle_name_owner_changed(
-        "org.guardian.Agent", "", ":1.42"  # Missing username and PID
+        "org.guardian.Agent",
+        "",
+        ":1.42",  # Missing username and PID
     )
 
     # Should not crash, map should remain empty

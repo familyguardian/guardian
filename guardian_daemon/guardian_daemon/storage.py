@@ -358,7 +358,7 @@ class Storage:
 
                 logger.debug(
                     f"Updated session progress for logind_session_id: {session_id}, "
-                    f"duration: {duration_seconds/60:.1f} min"
+                    f"duration: {duration_seconds / 60:.1f} min"
                 )
 
     def update_session_logout(

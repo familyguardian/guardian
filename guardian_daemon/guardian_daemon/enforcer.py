@@ -106,25 +106,63 @@ class Enforcer:
 
         now = time.time()
 
-        # Use debounced notifications to prevent duplicate messages
-        # Notify at 1, 5, and 10 minutes remaining (thresholds in minutes)
+        # Notification strategy:
+        # - Notify at 15, 10, and 5 minutes remaining
+        # - Then minutely notifications from 4 minutes down to 1 minute
+        # - Then grace period starts with minutely notifications
         if remaining_time <= 1:
-            if self._should_send_notification(username, "1min", remaining_time, now):
+            if self._should_send_notification(
+                username, "1min", remaining_time, now, cooldown=60
+            ):
                 logger.info(f"User {username} has 1 minute left.")
                 await self.notify_user(username, "1 minute left!", category="critical")
                 self._last_notifications[username]["1min"] = (now, remaining_time)
+        elif remaining_time <= 2:
+            if self._should_send_notification(
+                username, "2min", remaining_time, now, cooldown=60
+            ):
+                logger.info(f"User {username} has 2 minutes left.")
+                await self.notify_user(username, "2 minutes left!", category="critical")
+                self._last_notifications[username]["2min"] = (now, remaining_time)
+        elif remaining_time <= 3:
+            if self._should_send_notification(
+                username, "3min", remaining_time, now, cooldown=60
+            ):
+                logger.info(f"User {username} has 3 minutes left.")
+                await self.notify_user(username, "3 minutes left!", category="critical")
+                self._last_notifications[username]["3min"] = (now, remaining_time)
+        elif remaining_time <= 4:
+            if self._should_send_notification(
+                username, "4min", remaining_time, now, cooldown=60
+            ):
+                logger.info(f"User {username} has 4 minutes left.")
+                await self.notify_user(username, "4 minutes left!", category="critical")
+                self._last_notifications[username]["4min"] = (now, remaining_time)
         elif remaining_time <= 5:
-            if self._should_send_notification(username, "5min", remaining_time, now):
+            if self._should_send_notification(
+                username, "5min", remaining_time, now, cooldown=300
+            ):
                 logger.info(f"User {username} has 5 minutes left.")
                 await self.notify_user(username, "5 minutes left!", category="warning")
                 self._last_notifications[username]["5min"] = (now, remaining_time)
-        elif remaining_time <= 10 and remaining_time < total_time / 2:
-            if self._should_send_notification(username, "10min", remaining_time, now):
+        elif remaining_time <= 10:
+            if self._should_send_notification(
+                username, "10min", remaining_time, now, cooldown=300
+            ):
                 logger.info(f"User {username} has 10 minutes left.")
-                await self.notify_user(username, "10 minutes left!", category="info")
+                await self.notify_user(username, "10 minutes left!", category="warning")
                 self._last_notifications[username]["10min"] = (now, remaining_time)
+        elif remaining_time <= 15:
+            if self._should_send_notification(
+                username, "15min", remaining_time, now, cooldown=300
+            ):
+                logger.info(f"User {username} has 15 minutes left.")
+                await self.notify_user(username, "15 minutes left!", category="info")
+                self._last_notifications[username]["15min"] = (now, remaining_time)
         elif remaining_time <= total_time / 2:
-            if self._should_send_notification(username, "50pct", remaining_time, now):
+            if self._should_send_notification(
+                username, "50pct", remaining_time, now, cooldown=300
+            ):
                 logger.info(f"User {username} has used 50% of their time.")
                 await self.notify_user(
                     username, "50% of your time is used.", category="info"
@@ -137,6 +175,7 @@ class Enforcer:
         notification_key: str,
         current_remaining_time: float,
         current_time: float,
+        cooldown: int = None,
     ) -> bool:
         """
         Determines if a notification should be sent based on cooldown and time change.
@@ -146,10 +185,14 @@ class Enforcer:
             notification_key: Type of notification (e.g., "1min", "5min")
             current_remaining_time: Current remaining time in minutes
             current_time: Current timestamp
+            cooldown: Custom cooldown period in seconds (uses default if None)
 
         Returns:
             bool: True if notification should be sent
         """
+        if cooldown is None:
+            cooldown = self._notification_cooldown
+
         if (
             username not in self._last_notifications
             or notification_key not in self._last_notifications[username]
@@ -161,18 +204,17 @@ class Enforcer:
         time_elapsed = current_time - last_time
 
         # Don't send if we're still in cooldown period
-        if time_elapsed < self._notification_cooldown:
+        if time_elapsed < cooldown:
             logger.debug(
-                f"Skipping {notification_key} notification for {username} - cooldown active for {self._notification_cooldown - time_elapsed:.1f}s more"
+                f"Skipping {notification_key} notification for {username} - cooldown active for {cooldown - time_elapsed:.1f}s more"
             )
             return False
 
         # Send if remaining time has changed significantly (>= 1 minute difference)
         # or if enough time has passed since last notification (>= cooldown period)
-        # Send if remaining time has changed significantly (>= 1 minute difference)
         if (
             abs(current_remaining_time - last_remaining) >= 1
-            or time_elapsed >= self._notification_cooldown
+            or time_elapsed >= cooldown
         ):
             return True
 

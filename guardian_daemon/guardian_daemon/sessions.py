@@ -23,6 +23,43 @@ from guardian_daemon.user_manager import UserManager
 logger = get_logger("SessionTracker")
 
 
+def get_boot_id() -> str:
+    """
+    Get the system boot ID to make session IDs unique across reboots.
+
+    Returns:
+        str: Boot ID or empty string if not available
+    """
+    try:
+        with open("/proc/sys/kernel/random/boot_id", "r") as f:
+            return f.read().strip()
+    except Exception as e:
+        logger.warning(f"Could not read boot_id: {e}")
+        return ""
+
+
+def make_unique_session_id(logind_session_id: str, boot_id: str = None) -> str:
+    """
+    Create a unique session ID that persists across daemon restarts but changes across reboots.
+
+    Args:
+        logind_session_id: The session ID from logind (e.g., "4", "5")
+        boot_id: Optional boot ID (will fetch if not provided)
+
+    Returns:
+        str: Unique session ID in format "bootid_sessionid" or just sessionid if no boot_id
+    """
+    if boot_id is None:
+        boot_id = get_boot_id()
+
+    if boot_id:
+        # Use first 8 chars of boot_id to keep it manageable
+        return f"{boot_id[:8]}_{logind_session_id}"
+    else:
+        # Fallback to just logind session ID (pre-fix behavior)
+        return logind_session_id
+
+
 class SessionTracker:
     """
     Monitors and stores user sessions, checks quota and curfew.
@@ -234,34 +271,47 @@ class SessionTracker:
         """
         Called via D-Bus/IPC from agent to record lock/unlock events for a session.
         Also updates session progress in the database.
+
+        Args:
+            session_id: Logind session ID from the agent (will be mapped to unique ID)
         """
         async with self.session_lock:
-            if session_id not in self.active_sessions:
-                logger.warning(f"Lock event for unknown session: {session_id}")
+            # Map logind session_id to unique session_id
+            unique_session_id = self.logind_to_unique.get(session_id, session_id)
+
+            if unique_session_id not in self.active_sessions:
+                logger.warning(
+                    f"Lock event for unknown session: {session_id} (mapped to {unique_session_id})"
+                )
                 return
-            if session_id not in self.session_locks:
-                self.session_locks[session_id] = []
+            if unique_session_id not in self.session_locks:
+                self.session_locks[unique_session_id] = []
             if locked:
                 # Lock started
-                self.session_locks[session_id].append((timestamp, None))
-                logger.debug(f"Session {session_id}: screen locked at {timestamp}")
+                self.session_locks[unique_session_id].append((timestamp, None))
+                logger.debug(
+                    f"Session {unique_session_id}: screen locked at {timestamp}"
+                )
             else:
                 # Lock ended
                 # Find last open lock period
-                for i in range(len(self.session_locks[session_id]) - 1, -1, -1):
-                    lock_start, lock_end = self.session_locks[session_id][i]
+                for i in range(len(self.session_locks[unique_session_id]) - 1, -1, -1):
+                    lock_start, lock_end = self.session_locks[unique_session_id][i]
                     if lock_end is None:
                         # Mark lock end and adjust session start to exclude locked period
-                        self.session_locks[session_id][i] = (lock_start, timestamp)
-                        session = self.active_sessions.get(session_id)
+                        self.session_locks[unique_session_id][i] = (
+                            lock_start,
+                            timestamp,
+                        )
+                        session = self.active_sessions.get(unique_session_id)
                         if session:
                             locked_duration = timestamp - lock_start
                             session["start_time"] += locked_duration
                         logger.debug(
-                            f"Session {session_id}: screen unlocked at {timestamp}, excluded {locked_duration:.1f}s locked"
+                            f"Session {unique_session_id}: screen unlocked at {timestamp}, excluded {locked_duration:.1f}s locked"
                         )
                         # Remove the processed lock entry
-                        self.session_locks[session_id].pop(i)
+                        self.session_locks[unique_session_id].pop(i)
                         break
             # No longer updating DB here; periodic task handles it.
 
@@ -330,13 +380,18 @@ class SessionTracker:
                 now = time.time()
                 active_session_ids = list(self.active_sessions.keys())
 
-                for session_id in active_session_ids:
-                    session = self.active_sessions.get(session_id)
+                for unique_session_id in active_session_ids:
+                    session = self.active_sessions.get(unique_session_id)
                     if not session:
                         continue
 
+                    # Get the logind session ID for D-Bus queries
+                    logind_session_id = session.get(
+                        "logind_session_id", unique_session_id
+                    )
+
                     try:
-                        session_path = await manager.call_get_session(session_id)
+                        session_path = await manager.call_get_session(logind_session_id)
                         session_obj = bus.get_proxy_object(
                             "org.freedesktop.login1",
                             session_path,
@@ -352,14 +407,14 @@ class SessionTracker:
                         # If session is locked, we should not accumulate time
                         if is_locked:
                             logger.debug(
-                                f"Session {session_id} for user {session['username']} is locked, pausing time accumulation."
+                                f"Session {unique_session_id} (logind: {logind_session_id}) for user {session['username']} is locked, pausing time accumulation."
                             )
                             # By continuing, we skip the duration update for this locked session
                             continue
 
                     except Exception as e:
                         logger.error(
-                            f"Failed to check lock state for session {session_id}: {e}"
+                            f"Failed to check lock state for session {unique_session_id} (logind: {logind_session_id}): {e}"
                         )
                         # If we get a D-Bus error, reconnect on next iteration
                         if "dbus" in str(e).lower() or "disconnect" in str(e).lower():
@@ -371,14 +426,14 @@ class SessionTracker:
 
                     async with self.session_lock:
                         # Re-fetch session data in case it changed
-                        session = self.active_sessions.get(session_id)
+                        session = self.active_sessions.get(unique_session_id)
                         if not session:
                             continue
 
                         # Calculate raw duration since session start
                         raw_duration = now - session["start_time"]
                         # Subtract any locked-period durations so locked time isn't counted/frozen
-                        locked_periods = self.session_locks.get(session_id, [])
+                        locked_periods = self.session_locks.get(unique_session_id, [])
                         locked_seconds = sum(
                             (lock_end or now) - lock_start
                             for lock_start, lock_end in locked_periods
@@ -388,19 +443,22 @@ class SessionTracker:
                         # Log useful debugging information about the session
                         username = session.get("username", "unknown")
                         logger.debug(
-                            f"Updating session {session_id} for {username}: "
+                            f"Updating session {unique_session_id} (logind: {logind_session_id}) for {username}: "
                             f"start_time={session['start_time']}, "
-                            f"current_duration={duration/60:.1f} minutes"
+                            f"current_duration={duration / 60:.1f} minutes"
                         )
 
                         # CRITICAL FIX: Keep database update within the lock to prevent race conditions
                         # This ensures atomicity between reading session state and writing to database
-                        self.storage.update_session_progress(session_id, duration)
+                        # Use unique_session_id for database storage
+                        self.storage.update_session_progress(
+                            unique_session_id, duration
+                        )
 
                         # Log more detailed information at info level if significant time has passed
                         if duration > 300:  # More than 5 minutes
                             logger.info(
-                                f"Session {session_id} for {username} has accumulated {duration/60:.1f} minutes"
+                                f"Session {unique_session_id} for {username} has accumulated {duration / 60:.1f} minutes"
                             )
             except Exception as e:
                 logger.error(f"Error in periodic session update: {e}", exc_info=True)
@@ -434,6 +492,13 @@ class SessionTracker:
         self.session_lock = asyncio.Lock()
         self.agent_name_map: dict[str, set[str]] = {}
 
+        # Get boot ID to ensure session IDs are unique across reboots
+        self.boot_id = get_boot_id()
+        logger.info(f"Session tracker initialized with boot_id: {self.boot_id[:8]}...")
+
+        # Mapping from logind session_id to unique session_id for quick lookup
+        self.logind_to_unique: dict[str, str] = {}
+
         # Restore active sessions from database (sessions with no end_time)
         self._restore_active_sessions()
 
@@ -457,7 +522,7 @@ class SessionTracker:
             for session_row in open_sessions:
                 session_id, username, _, start_time, duration, _, _ = session_row
                 logger.info(
-                    f"Found open session {session_id} for {username} with duration {duration/60:.1f} min"
+                    f"Found open session {session_id} for {username} with duration {duration / 60:.1f} min"
                 )
         except Exception as e:
             logger.error(f"Error updating open sessions before restore: {e}")
@@ -495,28 +560,39 @@ class SessionTracker:
             }
 
         # Now process the unique sessions
-        for session_id, session_data in unique_sessions.items():
+        for unique_session_id, session_data in unique_sessions.items():
             # Calculate adjusted start time to preserve accumulated session time
             adjusted_start_time = now - session_data["duration"]
 
-            self.active_sessions[session_id] = {
+            # Extract logind session ID from unique ID (format: bootid_sessionid)
+            # For old sessions without boot_id prefix, use the full ID as logind_session_id
+            if "_" in unique_session_id:
+                logind_session_id = unique_session_id.split("_", 1)[1]
+                # Populate the mapping for restored sessions
+                self.logind_to_unique[logind_session_id] = unique_session_id
+            else:
+                # Old format session - use as-is
+                logind_session_id = unique_session_id
+
+            self.active_sessions[unique_session_id] = {
                 "uid": session_data["uid"],
                 "username": session_data["username"],
                 "start_time": adjusted_start_time,  # Key fix: adjusted start preserves previous usage
                 "original_start_time": session_data["old_start_time"],
                 "desktop": session_data["desktop"],
                 "service": session_data["service"],
+                "logind_session_id": logind_session_id,  # Store logind ID for D-Bus queries
             }
 
             # For better tracking, record the preserved duration
-            self.active_sessions[session_id]["preserved_duration"] = session_data[
-                "duration"
-            ]
+            self.active_sessions[unique_session_id]["preserved_duration"] = (
+                session_data["duration"]
+            )
 
             logger.info(
-                f"Restored session {session_id} for {session_data['username']}: preserved duration {session_data['duration']/60:.1f} min"
+                f"Restored session {unique_session_id} (logind: {logind_session_id}) for {session_data['username']}: preserved duration {session_data['duration'] / 60:.1f} min"
             )
-            self.session_locks[session_id] = []
+            self.session_locks[unique_session_id] = []
 
         if rows:
             logger.info(
@@ -571,21 +647,28 @@ class SessionTracker:
         # This handles time rules, group membership, and systemd service setup
         logger.info(f"Setting up user {username} for login session {session_id}")
 
+        # Create unique session ID that includes boot_id to prevent reuse across reboots
+        unique_session_id = make_unique_session_id(session_id, self.boot_id)
+        logger.debug(f"Unique session ID: {unique_session_id} (logind: {session_id})")
+
         async with self.session_lock:
-            self.active_sessions[session_id] = {
+            self.active_sessions[unique_session_id] = {
                 "uid": uid,
                 "username": username,
                 "start_time": time.time(),  # UNIX epoch
                 "desktop": desktop,
                 "service": service,
+                "logind_session_id": session_id,  # Keep original for logind operations
             }
-            self.session_locks[session_id] = []
+            self.session_locks[unique_session_id] = []
+            # Add mapping for quick lookup from logind events
+            self.logind_to_unique[session_id] = unique_session_id
 
         # Create session entry with end_time and duration=0
         async with self.session_lock:
-            start_time = self.active_sessions[session_id]["start_time"]
+            start_time = self.active_sessions[unique_session_id]["start_time"]
         await self.storage.add_session(
-            session_id,
+            unique_session_id,
             username,
             uid,
             start_time,
@@ -594,18 +677,20 @@ class SessionTracker:
             desktop,
             service,
         )
-        logger.info(f"Login: {username} (UID {uid}) Session {session_id}")
+        logger.info(f"Login: {username} (UID {uid}) Session {unique_session_id}")
 
     async def handle_logout(self, session_id):
         """
         End a session on logout and save it in the database for child accounts.
 
         Args:
-            session_id (str): Session ID
+            session_id (str): Logind session ID (will be mapped to unique session ID)
         """
+        # Convert logind session_id to unique session_id
         async with self.session_lock:
-            session = self.active_sessions.pop(session_id, None)
-            lock_periods = self.session_locks.pop(session_id, [])
+            unique_session_id = self.logind_to_unique.pop(session_id, session_id)
+            session = self.active_sessions.pop(unique_session_id, None)
+            lock_periods = self.session_locks.pop(unique_session_id, [])
         if session:
             kids = set(self.policy.data.get("users", {}).keys())
             if session["username"] not in kids:
@@ -629,20 +714,22 @@ class SessionTracker:
                 )
                 effective_duration = 0.0
             logger.debug(
-                f"Session {session_id}: raw duration={duration:.1f}s, locked={locked_time:.1f}s, effective={effective_duration:.1f}s"
+                f"Session {unique_session_id}: raw duration={duration:.1f}s, locked={locked_time:.1f}s, effective={effective_duration:.1f}s"
             )
             # Update session entry
-            self.storage.update_session_logout(session_id, end_time, effective_duration)
+            self.storage.update_session_logout(
+                unique_session_id, end_time, effective_duration
+            )
             logger.info(
-                f"Logout: {session['username']} Session {session_id} Duration: {effective_duration:.1f}s (locked: {locked_time:.1f}s)"
+                f"Logout: {session['username']} Session {unique_session_id} (logind: {session_id}) Duration: {effective_duration:.1f}s (locked: {locked_time:.1f}s)"
             )
 
             # Check if this is the last session for this user today
             async with self.session_lock:
                 user_has_active_sessions = any(
                     s["username"] == session["username"]
-                    for s in self.active_sessions.values()
-                    if s["session_id"] != session_id
+                    for s_id, s in self.active_sessions.items()
+                    if s_id != unique_session_id
                 )
                 if not user_has_active_sessions:
                     # This is the last session, trigger summarization and cleanup
@@ -991,12 +1078,12 @@ class SessionTracker:
                 if force:
                     self.storage.clean_old_sessions(username, None)
                     logger.info(
-                        f"Force reset completed for {username}: archived {summary['total_screen_time']/60:.1f} minutes, quota now 0"
+                        f"Force reset completed for {username}: archived {summary['total_screen_time'] / 60:.1f} minutes, quota now 0"
                     )
                 else:
                     self.storage.clean_old_sessions(username, today)
                     logger.info(
-                        f"Reset completed for user {username}: {summary['total_screen_time']/60:.1f} minutes used"
+                        f"Reset completed for user {username}: {summary['total_screen_time'] / 60:.1f} minutes used"
                     )
             except Exception as e:
                 logger.error(f"Error during reset for user {username}: {e}")
@@ -1079,7 +1166,7 @@ class SessionTracker:
             self.storage.save_history_entry(summary)
 
             logger.info(
-                f"User {username} reached quota. Added summary to history: {summary['total_screen_time']/60:.1f} minutes used."
+                f"User {username} reached quota. Added summary to history: {summary['total_screen_time'] / 60:.1f} minutes used."
             )
 
             # We don't clean up sessions yet as the day isn't over
