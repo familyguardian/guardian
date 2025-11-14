@@ -1173,26 +1173,6 @@ class UserManager:
         except Exception as e:
             logger.error(f"Failed to ensure systemd user service for {username}: {e}")
 
-        # User login setup continues in the main setup_user_login method
-
-        if not self.user_exists(username):
-            logger.warning(f"User '{username}' does not exist, cannot set up login.")
-            return False
-
-        # Step 1: Update PAM time rules for all users
-        self.write_time_rules()
-
-        # Step 2: Ensure user is in required groups
-        logger.info(f"Ensuring {username} is in required groups")
-        self.ensure_kids_group()
-
-        # Step 3: Set up and activate systemd user service
-        logger.info(f"Ensuring guardian agent service is running for {username}")
-        self.ensure_systemd_user_service(username)
-
-        logger.info(f"User login setup complete for {username}")
-        return True
-
     def _ensure_sddm_pam_time(self):
         """
         Ensures pam_time.so is explicitly added to SDDM's PAM account phase.

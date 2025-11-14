@@ -359,3 +359,54 @@ def test_handle_name_owner_changed_non_agent_name(session_tracker):
 
     # Should not add to agent map
     assert len(session_tracker.agent_name_map) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_remaining_time_with_db_sessions(session_tracker):
+    """
+    Test get_remaining_time correctly calculates used time from database sessions.
+    This is a regression test for the bug where wrong tuple indices were used.
+
+    Bug: Code was using s[6] for duration, but actual tuple format is:
+    (session_id, username, uid, start_time, end_time, duration, desktop, service)
+    So duration is at index 5, not 6.
+    """
+    # Use a user from the test config who has a quota
+    username = "test_full_settings"  # Has daily quota of 120 minutes    # Add some completed sessions to the database
+    now = time.time()
+    session_start = now - 3600  # 1 hour ago
+
+    # Add a session with 30 minutes (1800 seconds) of usage
+    await session_tracker.storage.add_session(
+        session_id="test_session_1",
+        username=username,
+        uid=1000,
+        start_time=session_start,
+        end_time=session_start + 1800,
+        duration_seconds=1800.0,  # 30 minutes
+        desktop="plasma",
+        service="sddm",
+    )
+
+    # Add another session with 45 minutes (2700 seconds) of usage
+    await session_tracker.storage.add_session(
+        session_id="test_session_2",
+        username=username,
+        uid=1000,
+        start_time=session_start + 2000,
+        end_time=session_start + 4700,
+        duration_seconds=2700.0,  # 45 minutes
+        desktop="gnome",
+        service="gdm",
+    )
+
+    # User has 120 minutes daily quota in test config
+    remaining = await session_tracker.get_remaining_time(username)
+
+    # Should have used 75 minutes (30 + 45), so 45 minutes remaining
+    # Allow small floating point tolerance
+    expected_remaining = 120.0 - 75.0  # 45 minutes
+    assert abs(remaining - expected_remaining) < 0.1, (
+        f"Expected ~{expected_remaining} minutes remaining, got {remaining}. "
+        f"This might indicate the tuple indices bug is present."
+    )

@@ -20,13 +20,13 @@ class GuardianIPCServer:
     """
     IPC server for admin commands of the Guardian Daemon.
     Provides a socket interface for status and control commands.
-    
+
     Security: Enforces request size limits and proper authentication.
     """
-    
+
     # Maximum request size: 1MB (prevents memory exhaustion attacks)
     MAX_REQUEST_SIZE = 1024 * 1024
-    
+
     # Rate limiting: max 100 requests per minute per connection
     RATE_LIMIT_WINDOW = 60  # seconds
     RATE_LIMIT_MAX_REQUESTS = 100
@@ -101,32 +101,34 @@ class GuardianIPCServer:
     def _check_rate_limit(self, uid: int) -> bool:
         """
         Check if the UID has exceeded rate limits.
-        
+
         Args:
             uid: User ID to check
-            
+
         Returns:
             bool: True if within limits, False if exceeded
         """
         import time
+
         now = time.time()
-        
+
         # Clean up old entries
         if uid in self._request_counts:
             self._request_counts[uid] = [
-                (ts, count) for ts, count in self._request_counts[uid]
+                (ts, count)
+                for ts, count in self._request_counts[uid]
                 if now - ts < self.RATE_LIMIT_WINDOW
             ]
-        
+
         # Count recent requests
         if uid not in self._request_counts:
             self._request_counts[uid] = []
-        
+
         recent_count = sum(count for ts, count in self._request_counts[uid])
-        
+
         if recent_count >= self.RATE_LIMIT_MAX_REQUESTS:
             return False
-        
+
         # Record this request
         self._request_counts[uid].append((now, 1))
         return True
@@ -161,14 +163,16 @@ class GuardianIPCServer:
             writer.close()
             await writer.wait_closed()
             return
-        
+
         # Check rate limiting (root is exempt)
         if peer_uid != 0 and not self._check_rate_limit(peer_uid):
             logger.warning(
                 f"Rate limit exceeded for UID={peer_uid}. "
                 f"Max {self.RATE_LIMIT_MAX_REQUESTS} requests per {self.RATE_LIMIT_WINDOW}s"
             )
-            error_response = json.dumps({"error": "Rate limit exceeded. Try again later."})
+            error_response = json.dumps(
+                {"error": "Rate limit exceeded. Try again later."}
+            )
             error_data = error_response.encode()
             try:
                 writer.write(len(error_data).to_bytes(4, "big"))
@@ -184,16 +188,18 @@ class GuardianIPCServer:
             # Read message length (4 bytes)
             len_data = await reader.readexactly(4)
             msg_len = int.from_bytes(len_data, "big")
-            
+
             # Validate message size to prevent memory exhaustion
             if msg_len > self.MAX_REQUEST_SIZE:
                 logger.warning(
                     f"Rejected oversized IPC request: {msg_len} bytes from "
                     f"UID={peer_uid} (max: {self.MAX_REQUEST_SIZE} bytes)"
                 )
-                error_response = json.dumps({
-                    "error": f"Request too large. Maximum size is {self.MAX_REQUEST_SIZE} bytes"
-                })
+                error_response = json.dumps(
+                    {
+                        "error": f"Request too large. Maximum size is {self.MAX_REQUEST_SIZE} bytes"
+                    }
+                )
                 error_data = error_response.encode()
                 writer.write(len(error_data).to_bytes(4, "big"))
                 writer.write(error_data)
@@ -201,7 +207,7 @@ class GuardianIPCServer:
                 writer.close()
                 await writer.wait_closed()
                 return
-            
+
             if msg_len <= 0:
                 logger.warning(f"Invalid message length: {msg_len} from UID={peer_uid}")
                 writer.close()
@@ -427,6 +433,10 @@ class GuardianIPCServer:
         This also imports new users from the config to the database.
         """
         try:
+            # Reload config from disk to get latest changes
+            logger.info("Reloading configuration from disk before sync")
+            self.policy.reload()
+
             # Get all users from the config
             config_users = self.policy.data.get("users", {})
             defaults = self.policy.data.get("defaults", {})
@@ -448,18 +458,31 @@ class GuardianIPCServer:
 
             # Update existing users in the database with config settings
             for username, settings in config_users.items():
-                if not settings:
-                    settings = defaults
+                # Merge user settings with defaults (same logic as sync_config_to_db)
+                merged_settings = defaults.copy()
+                if settings:
+                    # Deep merge for nested dicts (like curfew)
+                    for key, value in settings.items():
+                        if (
+                            isinstance(value, dict)
+                            and key in merged_settings
+                            and isinstance(merged_settings[key], dict)
+                        ):
+                            # Deep merge nested dicts
+                            merged_settings[key] = {**merged_settings[key], **value}
+                        else:
+                            # Override with user value
+                            merged_settings[key] = value
 
                 if username in db_users:
                     # User exists in DB, update settings
-                    self.policy.storage.set_user_settings(username, settings)
+                    self.policy.storage.set_user_settings(username, merged_settings)
                     updated.append(username)
                     logger.info(f"Updated settings for existing user: {username}")
                 else:
                     # User not in DB, add them
                     self.policy.add_user(username)
-                    self.policy.storage.set_user_settings(username, settings)
+                    self.policy.storage.set_user_settings(username, merged_settings)
                     added.append(username)
                     logger.info(f"Added new user from config: {username}")
 

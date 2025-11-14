@@ -207,16 +207,17 @@ class SessionTracker:
         )
 
         active_session_ids = set(self.active_sessions.keys())
-        # Session columns: 0=id, 1=session_id, 2=username, 3=uid, 4=start_time, 5=end_time, 6=duration, 7=desktop, 8=service
+        # Session columns: 0=session_id, 1=username, 2=uid, 3=start_time, 4=end_time, 5=duration, 6=desktop, 7=service
         filtered_sessions = [
             s
             for s in db_sessions
-            if s[6] > 30  # Has meaningful duration
-            and s[8] != "systemd-user"  # Not a systemd-user session
-            and s[7]  # Has a desktop value
-            and s[1] not in active_session_ids  # Not currently active (s[1] is session_id, not s[0] which is db id)
+            if s[5] > 30  # Has meaningful duration (s[5] is duration)
+            and s[7] != "systemd-user"  # Not a systemd-user session (s[7] is service)
+            and s[6]  # Has a desktop value (s[6] is desktop)
+            and s[0]
+            not in active_session_ids  # Not currently active (s[0] is session_id)
         ]
-        db_duration_seconds = sum(s[6] for s in filtered_sessions)
+        db_duration_seconds = sum(s[5] for s in filtered_sessions)
 
         total_seconds = active_duration_seconds + db_duration_seconds
         used_minutes = total_seconds / 60
@@ -267,23 +268,25 @@ class SessionTracker:
     async def _get_dbus_connection(self):
         """
         Get or create a D-Bus connection with retry logic.
-        
+
         Returns:
             tuple: (bus, manager) D-Bus objects
-            
+
         Raises:
             Exception: If connection fails after all retries
         """
         max_retries = 3
         retry_delay = 2.0
-        
+
         for attempt in range(max_retries):
             try:
                 bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
                 logind = bus.get_proxy_object(
                     "org.freedesktop.login1",
                     "/org/freedesktop/login1",
-                    await bus.introspect("org.freedesktop.login1", "/org/freedesktop/login1")
+                    await bus.introspect(
+                        "org.freedesktop.login1", "/org/freedesktop/login1"
+                    ),
                 )
                 manager = logind.get_interface("org.freedesktop.login1.Manager")
                 logger.debug("D-Bus connection established successfully")
@@ -297,7 +300,9 @@ class SessionTracker:
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2  # Exponential backoff
                 else:
-                    logger.error(f"Failed to connect to D-Bus after {max_retries} attempts: {e}")
+                    logger.error(
+                        f"Failed to connect to D-Bus after {max_retries} attempts: {e}"
+                    )
                     raise
 
     async def periodic_session_update(self, interval: int = 60):
@@ -308,7 +313,7 @@ class SessionTracker:
         """
         bus = None
         manager = None
-        
+
         while True:
             try:
                 # Ensure we have a valid D-Bus connection
@@ -316,10 +321,12 @@ class SessionTracker:
                     try:
                         bus, manager = await self._get_dbus_connection()
                     except Exception as e:
-                        logger.error(f"Cannot update sessions without D-Bus connection: {e}")
+                        logger.error(
+                            f"Cannot update sessions without D-Bus connection: {e}"
+                        )
                         await asyncio.sleep(interval)
                         continue
-                
+
                 now = time.time()
                 active_session_ids = list(self.active_sessions.keys())
 
@@ -333,7 +340,9 @@ class SessionTracker:
                         session_obj = bus.get_proxy_object(
                             "org.freedesktop.login1",
                             session_path,
-                            await bus.introspect("org.freedesktop.login1", session_path),
+                            await bus.introspect(
+                                "org.freedesktop.login1", session_path
+                            ),
                         )
                         session_iface = session_obj.get_interface(
                             "org.freedesktop.login1.Session"
@@ -354,7 +363,9 @@ class SessionTracker:
                         )
                         # If we get a D-Bus error, reconnect on next iteration
                         if "dbus" in str(e).lower() or "disconnect" in str(e).lower():
-                            logger.warning("D-Bus error detected, will reconnect on next iteration")
+                            logger.warning(
+                                "D-Bus error detected, will reconnect on next iteration"
+                            )
                             bus = None
                             manager = None
 
@@ -531,11 +542,24 @@ class SessionTracker:
             return
         desktop = props.get("Desktop", None)
         service = props.get("Service", None)
+        session_class = props.get("Class", None)
+
+        # Filter out non-interactive sessions:
+        # - systemd-user: System service management sessions
+        # - background: Sessions from runuser, sudo, cron, etc.
+        # We only want to track and set up for real user login sessions
         if service == "systemd-user":
             logger.info(
                 f"Ignoring systemd-user session: {session_id} for user {username}"
             )
             return
+
+        if session_class == "background":
+            logger.debug(
+                f"Ignoring background session: {session_id} for user {username}"
+            )
+            return
+
         # Set up user account with time rules and services
         if not await asyncio.to_thread(self.user_manager.setup_user_login, username):
             logger.error(
@@ -828,17 +852,28 @@ class SessionTracker:
                         # First try the direct get_uid method
                         uid = await session_iface.get_uid()
                     except AttributeError:
-                        # If get_uid fails, try get_user which might return a UID
+                        # If get_uid fails, try get_user which returns (uid, path) tuple
                         try:
                             logger.debug("get_uid failed, trying get_user for session")
                             user = await session_iface.get_user()
-                            if isinstance(user, int):
+                            # User property is a tuple (uid, object_path)
+                            if isinstance(user, (list, tuple)) and len(user) >= 1:
+                                uid = user[0]
+                            elif isinstance(user, int):
                                 uid = user
                         except Exception:
                             # As a last resort, try to extract from properties
                             logger.debug("get_user failed, checking properties for UID")
-                            if "User" in props and isinstance(props["User"], int):
-                                uid = props["User"]
+                            if "User" in props:
+                                user_prop = props["User"]
+                                # User property is a tuple (uid, object_path)
+                                if (
+                                    isinstance(user_prop, (list, tuple))
+                                    and len(user_prop) >= 1
+                                ):
+                                    uid = user_prop[0]
+                                elif isinstance(user_prop, int):
+                                    uid = user_prop
 
                     # If we still couldn't get the UID, we can't proceed
                     if uid is None:
@@ -885,7 +920,8 @@ class SessionTracker:
         """
 
         try:
-            return await asyncio.to_thread(pwd.getpwuid, uid).pw_name
+            pw_entry = await asyncio.to_thread(pwd.getpwuid, uid)
+            return pw_entry.pw_name
         except Exception:
             return str(uid)
 
@@ -895,9 +931,12 @@ class SessionTracker:
         clean up sessions table, and reset quotas.
 
         This should be called when:
-        1. The system is first booted/unlocked for the day
+        1. The system is first booted/unlocked for the day (normal reset)
         2. The daily quota is reached
         3. The configured reset_time is reached
+        4. Manually via reset-quota command (force=True)
+
+        When force=True, resets today's quota to zero by archiving current sessions.
         """
         today = datetime.date.today().strftime("%Y-%m-%d")
         last_reset_date = self.storage.get_last_reset_date()
@@ -907,9 +946,14 @@ class SessionTracker:
             logger.debug(f"Daily reset already performed today ({today})")
             return
 
-        logger.info(
-            f"Performing daily reset. Last reset: {last_reset_date}, Today: {today}"
-        )
+        if force:
+            logger.info(
+                "Forcing quota reset - archiving all sessions including today's"
+            )
+        else:
+            logger.info(
+                f"Performing daily reset. Last reset: {last_reset_date}, Today: {today}"
+            )
 
         # Get all managed users
         kids = set(self.policy.data.get("users", {}).keys())
@@ -923,10 +967,14 @@ class SessionTracker:
                     "daily_quota_minutes", 90
                 )  # Default 90 minutes
 
-                # Summarize sessions for this user
-                summary = self.storage.summarize_user_sessions(
-                    username, last_reset_date
-                )
+                # When forcing reset, summarize ALL sessions including today
+                # When normal reset, summarize sessions since last reset
+                if force:
+                    summary = self.storage.summarize_user_sessions(username, None)
+                else:
+                    summary = self.storage.summarize_user_sessions(
+                        username, last_reset_date
+                    )
 
                 # Check if quota was exceeded
                 if summary["total_screen_time"] > (daily_quota_minutes * 60):
@@ -937,18 +985,28 @@ class SessionTracker:
                 # Save to history
                 self.storage.save_history_entry(summary)
 
-                # Clean up old sessions
-                self.storage.clean_old_sessions(username, today)
-
-                logger.info(
-                    f"Reset completed for user {username}: {summary['total_screen_time']/60:.1f} minutes used"
-                )
+                # Clean up sessions:
+                # - When forcing: delete ALL sessions (including today) to reset quota
+                # - When normal: delete only old sessions (before today)
+                if force:
+                    self.storage.clean_old_sessions(username, None)
+                    logger.info(
+                        f"Force reset completed for {username}: archived {summary['total_screen_time']/60:.1f} minutes, quota now 0"
+                    )
+                else:
+                    self.storage.clean_old_sessions(username, today)
+                    logger.info(
+                        f"Reset completed for user {username}: {summary['total_screen_time']/60:.1f} minutes used"
+                    )
             except Exception as e:
                 logger.error(f"Error during reset for user {username}: {e}")
 
-        # Update last reset date
-        self.storage.set_last_reset_date(today)
-        logger.info(f"Daily reset complete. Updated last reset date to {today}")
+        # Update last reset date (only for normal resets, not forced)
+        if not force:
+            self.storage.set_last_reset_date(today)
+            logger.info(f"Daily reset complete. Updated last reset date to {today}")
+        else:
+            logger.info("Force reset complete. Quotas reset to 0 for all users.")
 
     async def get_active_users(self) -> list:
         """
@@ -1034,10 +1092,14 @@ class GuardianDaemonInterface(ServiceInterface):
         self.session_tracker = session_tracker
 
     # The D-Bus signature is defined using string annotations, which is required by dbus-next.
-    # Pylance reports these as undefined variables, so we suppress the warning.
+    # D-Bus type annotations: 's' = string, 'b' = boolean, 'd' = double
     @method()
     async def LockEvent(
-        self, session_id: "s", username: "s", locked: "b", timestamp: "d"  # pyright: ignore[reportUndefinedVariable] # noqa: F821
+        self,
+        session_id: "s",  # noqa: F821
+        username: "s",  # noqa: F821
+        locked: "b",  # noqa: F821
+        timestamp: "d",  # noqa: F821
     ):
         """
         Receives lock/unlock events from agents and forwards to SessionTracker.

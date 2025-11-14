@@ -43,11 +43,17 @@ class Policy:
         logger.info("Policy loaded and synchronized to DB")
 
     def has_quota(self, username: str) -> bool:
-        """Check if a user has quota settings."""
+        """Check if a user has quota settings and is not quota_exempt."""
         # Check both config and database for quota settings
         user_settings_config = self.data.get("users", {}).get(username, {})
         user_settings_db = self.storage.get_user_settings(username)
-        
+
+        # Check if user is quota exempt (from config or merged db settings)
+        if user_settings_config.get("quota_exempt", False):
+            return False
+        if user_settings_db and user_settings_db.get("quota_exempt", False):
+            return False
+
         # Support both formats:
         # New format: "quota" key exists
         # Old format: "daily_quota_minutes" key exists
@@ -56,7 +62,7 @@ class Policy:
         if user_settings_db:
             if "quota" in user_settings_db or "daily_quota_minutes" in user_settings_db:
                 return True
-        
+
         return False
 
     def has_curfew(self, username: str) -> bool:
@@ -68,13 +74,13 @@ class Policy:
         """Get daily and weekly quota for a user."""
         if username not in self.data.get("users", {}):
             raise KeyError(f"User {username} not found in policy")
-        
+
         # Get user settings from database (which has the actual values)
         user_settings = self.storage.get_user_settings(username)
         if not user_settings:
             # Fallback to config data
             user_settings = self.data["users"][username]
-        
+
         # Support both formats:
         # 1. New format: {"quota": {"daily": 90, "weekly": 0}}
         # 2. Old format: {"daily_quota_minutes": 90}
@@ -86,7 +92,7 @@ class Policy:
             # Old format or direct keys
             daily = user_settings.get("daily_quota_minutes", 0)
             weekly = user_settings.get("weekly_quota_minutes", 0)
-        
+
         return daily, weekly
 
     def get_user_curfew(
@@ -99,12 +105,16 @@ class Policy:
         return curfew.get(period)
 
     def get_monitored_users(self) -> list[str]:
-        """Get list of all monitored users."""
-        return [
-            username
-            for username, settings in self.data.get("users", {}).items()
-            if self.has_quota(username) or self.has_curfew(username)
-        ]
+        """Get list of all monitored users (excluding those with monitored: False)."""
+        result = []
+        for username, settings in self.data.get("users", {}).items():
+            # Check if user is explicitly marked as not monitored
+            if not settings.get("monitored", True):  # Default is True if not specified
+                continue
+            # Include user if they have quota or curfew settings
+            if self.has_quota(username) or self.has_curfew(username):
+                result.append(username)
+        return result
 
     def get_user_policy(self, username: str) -> Optional[Dict[str, Any]]:
         """

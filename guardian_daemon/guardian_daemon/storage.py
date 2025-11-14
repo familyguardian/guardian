@@ -163,6 +163,7 @@ class Storage:
     def sync_config_to_db(self, config: dict):
         """
         Synchronize configuration data to the database.
+        Merges user settings with defaults to ensure complete configuration.
 
         Args:
             config (dict): Configuration data
@@ -175,14 +176,32 @@ class Storage:
                 select(UserSettings).where(UserSettings.username == "default")
             ).first()
 
-            if not result and "defaults" in config:
+            defaults = config.get("defaults", {})
+            if not result and defaults:
                 default_settings = UserSettings(
-                    username="default", settings=json.dumps(config["defaults"])
+                    username="default", settings=json.dumps(defaults)
                 )
                 session.add(default_settings)
 
-            # Add/update user settings
-            for username, settings in config.get("users", {}).items():
+            # Add/update user settings, merging with defaults
+            for username, user_config in config.get("users", {}).items():
+                # Merge user settings with defaults
+                # Start with defaults, then override with user-specific settings
+                merged_settings = defaults.copy()
+
+                # Deep merge for nested dicts (like curfew)
+                for key, value in user_config.items():
+                    if (
+                        isinstance(value, dict)
+                        and key in merged_settings
+                        and isinstance(merged_settings[key], dict)
+                    ):
+                        # Deep merge nested dicts
+                        merged_settings[key] = {**merged_settings[key], **value}
+                    else:
+                        # Override with user value
+                        merged_settings[key] = value
+
                 result = session.execute(
                     select(UserSettings).where(UserSettings.username == username)
                 ).first()
@@ -192,12 +211,12 @@ class Storage:
                     session.execute(
                         update(UserSettings)
                         .where(UserSettings.username == username)
-                        .values(settings=json.dumps(settings))
+                        .values(settings=json.dumps(merged_settings))
                     )
                 else:
                     # Create new
                     user_settings = UserSettings(
-                        username=username, settings=json.dumps(settings)
+                        username=username, settings=json.dumps(merged_settings)
                     )
                     session.add(user_settings)
 

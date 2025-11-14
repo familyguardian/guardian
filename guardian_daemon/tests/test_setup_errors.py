@@ -110,7 +110,7 @@ def test_setup_error_propagation_to_main():
         # Mock setup_logging to succeed
         with patch("guardian_daemon.__main__.setup_logging"):
             # Mock GuardianDaemon to succeed initialization
-            with patch("guardian_daemon.__main__.GuardianDaemon") as mock_daemon_class:
+            with patch("guardian_daemon.__main__.GuardianDaemon"):
                 # Mock asyncio.run to raise SetupError
                 with patch("asyncio.run", side_effect=SetupError("Test setup failure")):
                     # Should exit with code 1
