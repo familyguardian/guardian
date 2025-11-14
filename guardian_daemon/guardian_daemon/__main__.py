@@ -204,6 +204,10 @@ class GuardianDaemon:
         await self.systemd.reload_systemd()
         await self.check_and_recover_reset()
 
+        # Sync account locks on startup to ensure consistent state
+        logger.info("Syncing account locks on daemon startup")
+        await self.usermanager.sync_account_locks()
+
         try:
             await asyncio.gather(
                 self.tracker.run(),

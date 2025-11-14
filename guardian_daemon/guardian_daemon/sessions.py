@@ -1095,6 +1095,14 @@ class SessionTracker:
         else:
             logger.info("Force reset complete. Quotas reset to 0 for all users.")
 
+        # Sync account locks after quota reset
+        # This will unlock users who now have time available
+        if self.user_manager:
+            logger.info("Syncing account locks after quota reset")
+            await self.user_manager.sync_account_locks()
+        else:
+            logger.warning("User manager not available, cannot sync account locks")
+
     async def get_active_users(self) -> list:
         """
         Return a list of currently active usernames.

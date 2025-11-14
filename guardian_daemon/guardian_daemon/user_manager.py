@@ -1418,3 +1418,254 @@ class UserManager:
         except Exception as e:
             logger.error(f"Unexpected error running command for {username}: {e}")
             return None
+
+    def lock_user_account(self, username: str) -> bool:
+        """
+        Temporarily lock a user account to prevent login.
+        Uses usermod -L to disable password authentication.
+
+        Args:
+            username: The username to lock
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.validate_username(username):
+            logger.error(f"Invalid username for locking: {username}")
+            return False
+
+        try:
+            # Lock the password
+            result = subprocess.run(
+                ["usermod", "-L", username],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                logger.error(f"Failed to lock password for {username}: {result.stderr}")
+                return False
+
+            logger.info(f"Successfully locked account for user {username}")
+            return True
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout while locking account for {username}")
+            return False
+        except Exception as e:
+            logger.error(f"Error locking user account {username}: {e}")
+            return False
+
+    def unlock_user_account(self, username: str) -> bool:
+        """
+        Unlock a previously locked user account.
+        Uses usermod -U to re-enable password authentication.
+
+        Args:
+            username: The username to unlock
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.validate_username(username):
+            logger.error(f"Invalid username for unlocking: {username}")
+            return False
+
+        try:
+            # Unlock the password
+            result = subprocess.run(
+                ["usermod", "-U", username],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                logger.error(
+                    f"Failed to unlock password for {username}: {result.stderr}"
+                )
+                return False
+
+            logger.info(f"Successfully unlocked account for user {username}")
+            return True
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout while unlocking account for {username}")
+            return False
+        except Exception as e:
+            logger.error(f"Error unlocking user account {username}: {e}")
+            return False
+
+    def _is_user_in_curfew(self, username: str) -> bool:
+        """
+        Check if a user is currently within their curfew window.
+
+        Args:
+            username: The username to check
+
+        Returns:
+            bool: True if currently in curfew, False otherwise
+        """
+        import datetime
+
+        try:
+            # Check if user has curfew configured
+            if not self.policy.has_curfew(username):
+                return False
+
+            now = datetime.datetime.now()
+            is_weekend = now.weekday() >= 5  # Saturday=5, Sunday=6
+
+            # Get curfew for current day type
+            curfew = self.policy.get_user_curfew(username, is_weekend)
+            if not curfew:
+                return False
+
+            start_time = curfew.get("start")
+            end_time = curfew.get("end")
+
+            if not start_time or not end_time:
+                return False
+
+            # Parse times
+            start_hour, start_min = map(int, start_time.split(":"))
+            end_hour, end_min = map(int, end_time.split(":"))
+
+            current_time = now.time()
+            start = datetime.time(start_hour, start_min)
+            end = datetime.time(end_hour, end_min)
+
+            # Handle overnight curfews (e.g., 22:00-06:00)
+            if start > end:
+                return current_time >= start or current_time < end
+            else:
+                return start <= current_time < end
+
+        except Exception as e:
+            logger.error(f"Error checking curfew for {username}: {e}")
+            return False
+
+    def check_if_locked(self, username: str) -> bool:
+        """
+        Check if a user account is currently locked by examining password status.
+
+        Args:
+            username: The username to check
+
+        Returns:
+            bool: True if account is locked, False otherwise
+        """
+        if not self.validate_username(username):
+            return False
+
+        try:
+            result = subprocess.run(
+                ["passwd", "-S", username],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            # Output format: "username L ..." means locked, "username P ..." means password set
+            if result.returncode == 0:
+                is_locked = " L " in result.stdout
+                logger.debug(
+                    f"Account lock status for {username}: {'locked' if is_locked else 'unlocked'}"
+                )
+                return is_locked
+            else:
+                logger.warning(
+                    f"Could not check lock status for {username}: {result.stderr}"
+                )
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout while checking lock status for {username}")
+            return False
+        except Exception as e:
+            logger.error(f"Error checking lock status for {username}: {e}")
+            return False
+
+    async def sync_account_locks(self):
+        """
+        Synchronize user account locks with their current quota status.
+        Lock users who are out of time and within monitoring hours,
+        unlock those who have time or are outside monitoring hours.
+
+        This should be called:
+        - On daemon startup (to restore consistent state)
+        - During quota reset
+        - When curfew windows change
+        """
+        if not self.tracker:
+            logger.warning("Cannot sync account locks: session tracker not initialized")
+            return
+
+        managed_users = list(self.policy.data.get("users", {}).keys())
+        logger.info(f"Syncing account locks for {len(managed_users)} managed users")
+
+        for username in managed_users:
+            if not self.user_exists(username):
+                logger.warning(f"Skipping lock sync for non-existent user: {username}")
+                continue
+
+            try:
+                # Get current state
+                remaining_time = await self.tracker.get_remaining_time(username)
+                is_in_curfew = self._is_user_in_curfew(username)
+                is_actually_locked = self.check_if_locked(username)
+
+                # Determine desired lock state
+                # Lock if: out of time (regardless of curfew)
+                # Unlock if: has time available
+                # Rationale: Curfew provides additional protection via pam_time.so,
+                # but we lock when quota exhausted to prevent login immediately after curfew ends
+                should_be_locked = remaining_time <= 0
+
+                logger.debug(
+                    f"Lock sync for {username}: remaining={remaining_time:.2f}min, "
+                    f"in_curfew={is_in_curfew}, locked={is_actually_locked}, "
+                    f"should_lock={should_be_locked}"
+                )
+
+                # Sync the lock state
+                if should_be_locked and not is_actually_locked:
+                    logger.info(f"Locking {username} (quota exhausted)")
+                    self.lock_user_account(username)
+                elif not should_be_locked and is_actually_locked:
+                    logger.info(f"Unlocking {username} (quota available)")
+                    self.unlock_user_account(username)
+                else:
+                    logger.debug(f"Lock state for {username} is already correct")
+
+            except Exception as e:
+                logger.error(f"Error syncing locks for {username}: {e}")
+
+    def unlock_all_managed_users(self) -> int:
+        """
+        Emergency function to unlock all managed user accounts.
+        Used for manual recovery by administrators.
+
+        Returns:
+            int: Number of users successfully unlocked
+        """
+        managed_users = list(self.policy.data.get("users", {}).keys())
+        logger.warning(
+            f"Emergency unlock requested for {len(managed_users)} managed users"
+        )
+
+        unlocked_count = 0
+        for username in managed_users:
+            if not self.user_exists(username):
+                logger.warning(f"Skipping non-existent user: {username}")
+                continue
+
+            if self.check_if_locked(username):
+                if self.unlock_user_account(username):
+                    unlocked_count += 1
+            else:
+                logger.debug(f"User {username} is not locked, skipping")
+
+        logger.info(f"Emergency unlock completed: {unlocked_count} users unlocked")
+        return unlocked_count

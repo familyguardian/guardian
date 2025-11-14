@@ -146,3 +146,335 @@ def test_command_injection_prevention():
         assert not UserManager.validate_username(
             attempt
         ), f"Command injection blocked: {attempt}"
+
+
+# Account locking tests
+
+
+@patch("guardian_daemon.user_manager.subprocess.run")
+def test_lock_user_account_success(mock_run, user_manager):
+    """Test successful user account locking."""
+    # Mock successful usermod -L
+    mock_run.return_value = Mock(returncode=0, stderr="")
+
+    result = user_manager.lock_user_account("testuser")
+
+    assert result is True
+    mock_run.assert_called_once_with(
+        ["usermod", "-L", "testuser"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+
+@patch("guardian_daemon.user_manager.subprocess.run")
+def test_lock_user_account_failure(mock_run, user_manager):
+    """Test failed user account locking."""
+    # Mock failed usermod -L
+    mock_run.return_value = Mock(
+        returncode=1, stderr="usermod: user 'testuser' does not exist"
+    )
+
+    result = user_manager.lock_user_account("testuser")
+
+    assert result is False
+
+
+def test_lock_user_account_invalid_username(user_manager):
+    """Test that lock_user_account rejects invalid usernames."""
+    assert not user_manager.lock_user_account("../etc/passwd")
+    assert not user_manager.lock_user_account("user;rm -rf /")
+    assert not user_manager.lock_user_account("")
+    assert not user_manager.lock_user_account(None)
+
+
+@patch("guardian_daemon.user_manager.subprocess.run")
+def test_lock_user_account_timeout(mock_run, user_manager):
+    """Test lock_user_account handles timeouts gracefully."""
+    import subprocess
+
+    mock_run.side_effect = subprocess.TimeoutExpired("usermod", 10)
+
+    result = user_manager.lock_user_account("testuser")
+
+    assert result is False
+
+
+@patch("guardian_daemon.user_manager.subprocess.run")
+def test_unlock_user_account_success(mock_run, user_manager):
+    """Test successful user account unlocking."""
+    # Mock successful usermod -U
+    mock_run.return_value = Mock(returncode=0, stderr="")
+
+    result = user_manager.unlock_user_account("testuser")
+
+    assert result is True
+    mock_run.assert_called_once_with(
+        ["usermod", "-U", "testuser"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+
+@patch("guardian_daemon.user_manager.subprocess.run")
+def test_unlock_user_account_failure(mock_run, user_manager):
+    """Test failed user account unlocking."""
+    # Mock failed usermod -U
+    mock_run.return_value = Mock(
+        returncode=1, stderr="usermod: user 'testuser' does not exist"
+    )
+
+    result = user_manager.unlock_user_account("testuser")
+
+    assert result is False
+
+
+def test_unlock_user_account_invalid_username(user_manager):
+    """Test that unlock_user_account rejects invalid usernames."""
+    assert not user_manager.unlock_user_account("../etc/passwd")
+    assert not user_manager.unlock_user_account("user;rm -rf /")
+    assert not user_manager.unlock_user_account("")
+    assert not user_manager.unlock_user_account(None)
+
+
+@patch("guardian_daemon.user_manager.subprocess.run")
+def test_check_if_locked_user_is_locked(mock_run, user_manager):
+    """Test check_if_locked detects locked accounts."""
+    # Mock passwd -S output for locked account
+    mock_run.return_value = Mock(
+        returncode=0, stdout="testuser L 01/01/2024 0 99999 7 -1"
+    )
+
+    result = user_manager.check_if_locked("testuser")
+
+    assert result is True
+    mock_run.assert_called_once_with(
+        ["passwd", "-S", "testuser"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+
+
+@patch("guardian_daemon.user_manager.subprocess.run")
+def test_check_if_locked_user_is_unlocked(mock_run, user_manager):
+    """Test check_if_locked detects unlocked accounts."""
+    # Mock passwd -S output for unlocked account
+    mock_run.return_value = Mock(
+        returncode=0, stdout="testuser P 01/01/2024 0 99999 7 -1"
+    )
+
+    result = user_manager.check_if_locked("testuser")
+
+    assert result is False
+
+
+def test_check_if_locked_invalid_username(user_manager):
+    """Test that check_if_locked handles invalid usernames."""
+    assert not user_manager.check_if_locked("../etc/passwd")
+    assert not user_manager.check_if_locked("user;rm -rf /")
+    assert not user_manager.check_if_locked("")
+    assert not user_manager.check_if_locked(None)
+
+
+@patch("guardian_daemon.user_manager.subprocess.run")
+def test_check_if_locked_command_failure(mock_run, user_manager):
+    """Test check_if_locked handles command failures."""
+    # Mock failed passwd -S
+    mock_run.return_value = Mock(
+        returncode=1, stderr="passwd: user 'testuser' does not exist"
+    )
+
+    result = user_manager.check_if_locked("testuser")
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+@patch("guardian_daemon.user_manager.UserManager.user_exists")
+@patch("guardian_daemon.user_manager.UserManager.check_if_locked")
+@patch("guardian_daemon.user_manager.UserManager.lock_user_account")
+@patch("guardian_daemon.user_manager.UserManager.unlock_user_account")
+async def test_sync_account_locks_locks_user_out_of_time(
+    mock_unlock, mock_lock, mock_check_locked, mock_user_exists, user_manager
+):
+    """Test sync_account_locks locks users who are out of time."""
+    # Setup mocks
+    mock_user_exists.return_value = True
+    mock_check_locked.return_value = False  # Currently unlocked
+
+    # Mock tracker to return no remaining time (async)
+    async def mock_get_remaining_time(username):
+        return 0
+
+    user_manager.tracker = Mock()
+    user_manager.tracker.get_remaining_time = mock_get_remaining_time
+
+    # Mock policy and _is_user_in_curfew to indicate NOT in curfew
+    user_manager._is_user_in_curfew = Mock(return_value=False)
+    user_manager.policy.data = {"users": {"testuser": {}}}
+
+    await user_manager.sync_account_locks()
+
+    # Should lock the user
+    mock_lock.assert_called_once_with("testuser")
+    mock_unlock.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("guardian_daemon.user_manager.UserManager.user_exists")
+@patch("guardian_daemon.user_manager.UserManager.check_if_locked")
+@patch("guardian_daemon.user_manager.UserManager.lock_user_account")
+@patch("guardian_daemon.user_manager.UserManager.unlock_user_account")
+async def test_sync_account_locks_unlocks_user_with_time(
+    mock_unlock, mock_lock, mock_check_locked, mock_user_exists, user_manager
+):
+    """Test sync_account_locks unlocks users who have time remaining."""
+    # Setup mocks
+    mock_user_exists.return_value = True
+    mock_check_locked.return_value = True  # Currently locked
+
+    # Mock tracker to return remaining time (async)
+    async def mock_get_remaining_time(username):
+        return 30
+
+    user_manager.tracker = Mock()
+    user_manager.tracker.get_remaining_time = mock_get_remaining_time
+
+    # Mock _is_user_in_curfew to indicate NOT in curfew
+    user_manager._is_user_in_curfew = Mock(return_value=False)
+    user_manager.policy.data = {"users": {"testuser": {}}}
+
+    await user_manager.sync_account_locks()
+
+    # Should unlock the user
+    mock_unlock.assert_called_once_with("testuser")
+    mock_lock.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("guardian_daemon.user_manager.UserManager.user_exists")
+@patch("guardian_daemon.user_manager.UserManager.check_if_locked")
+@patch("guardian_daemon.user_manager.UserManager.lock_user_account")
+@patch("guardian_daemon.user_manager.UserManager.unlock_user_account")
+async def test_sync_account_locks_locks_even_during_curfew(
+    mock_unlock, mock_lock, mock_check_locked, mock_user_exists, user_manager
+):
+    """Test sync_account_locks locks users even during curfew when quota exhausted."""
+    # Setup mocks
+    mock_user_exists.return_value = True
+    mock_check_locked.return_value = False  # Currently unlocked
+
+    # Mock tracker to return no remaining time (async)
+    async def mock_get_remaining_time(username):
+        return 0
+
+    user_manager.tracker = Mock()
+    user_manager.tracker.get_remaining_time = mock_get_remaining_time
+
+    # Mock _is_user_in_curfew to indicate IN curfew
+    user_manager._is_user_in_curfew = Mock(return_value=True)
+    user_manager.policy.data = {"users": {"testuser": {}}}
+
+    await user_manager.sync_account_locks()
+
+    # Should lock the user (quota exhausted, even during curfew)
+    # This prevents login immediately after curfew ends
+    mock_lock.assert_called_once_with("testuser")
+    mock_unlock.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("guardian_daemon.user_manager.UserManager.user_exists")
+@patch("guardian_daemon.user_manager.UserManager.check_if_locked")
+@patch("guardian_daemon.user_manager.UserManager.lock_user_account")
+@patch("guardian_daemon.user_manager.UserManager.unlock_user_account")
+async def test_sync_account_locks_no_change_needed(
+    mock_unlock, mock_lock, mock_check_locked, mock_user_exists, user_manager
+):
+    """Test sync_account_locks skips when lock state is already correct."""
+    # Setup mocks
+    mock_user_exists.return_value = True
+    mock_check_locked.return_value = False  # Currently unlocked
+
+    # Mock tracker to return remaining time (async)
+    async def mock_get_remaining_time(username):
+        return 30
+
+    user_manager.tracker = Mock()
+    user_manager.tracker.get_remaining_time = mock_get_remaining_time
+
+    # Mock _is_user_in_curfew to indicate NOT in curfew
+    user_manager._is_user_in_curfew = Mock(return_value=False)
+    user_manager.policy.data = {"users": {"testuser": {}}}
+
+    await user_manager.sync_account_locks()
+
+    # Should not lock or unlock (already correct)
+    mock_lock.assert_not_called()
+    mock_unlock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_account_locks_without_tracker(user_manager):
+    """Test sync_account_locks handles missing tracker gracefully."""
+    user_manager.tracker = None
+    user_manager.policy.data = {"users": {"testuser": {}}}
+
+    # Should not raise an exception
+    await user_manager.sync_account_locks()
+
+
+@patch("guardian_daemon.user_manager.UserManager.user_exists")
+@patch("guardian_daemon.user_manager.UserManager.check_if_locked")
+@patch("guardian_daemon.user_manager.UserManager.unlock_user_account")
+def test_unlock_all_managed_users_success(
+    mock_unlock, mock_check_locked, mock_user_exists, user_manager
+):
+    """Test unlock_all_managed_users unlocks all locked users."""
+    # Setup mocks
+    mock_user_exists.side_effect = [True, True, True]
+    mock_check_locked.side_effect = [True, False, True]  # 2 locked, 1 unlocked
+    mock_unlock.return_value = True
+
+    user_manager.policy.data = {"users": {"user1": {}, "user2": {}, "user3": {}}}
+
+    result = user_manager.unlock_all_managed_users()
+
+    # Should unlock only the locked users (user1 and user3)
+    assert result == 2
+    assert mock_unlock.call_count == 2
+
+
+@patch("guardian_daemon.user_manager.UserManager.user_exists")
+def test_unlock_all_managed_users_no_users(mock_user_exists, user_manager):
+    """Test unlock_all_managed_users with no managed users."""
+    user_manager.policy.data = {"users": {}}
+
+    result = user_manager.unlock_all_managed_users()
+
+    assert result == 0
+
+
+@patch("guardian_daemon.user_manager.UserManager.user_exists")
+@patch("guardian_daemon.user_manager.UserManager.check_if_locked")
+def test_unlock_all_managed_users_skips_nonexistent(
+    mock_check_locked, mock_user_exists, user_manager
+):
+    """Test unlock_all_managed_users skips non-existent users."""
+    # Setup mocks
+    mock_user_exists.side_effect = [False, True]
+    mock_check_locked.return_value = False
+
+    user_manager.policy.data = {"users": {"nonexistent": {}, "testuser": {}}}
+
+    result = user_manager.unlock_all_managed_users()
+
+    # Should check only the existing user
+    assert mock_check_locked.call_count == 1
+    assert result == 0

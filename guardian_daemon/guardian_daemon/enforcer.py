@@ -347,6 +347,16 @@ class Enforcer:
                     logger.error(
                         f"Exception while terminating session {session_id} for user {username}: {e}"
                     )
+
+            # After terminating sessions, lock the account to prevent re-login
+            if self.tracker.user_manager:
+                logger.info(f"Locking account for {username} to prevent re-login")
+                self.tracker.user_manager.lock_user_account(username)
+            else:
+                logger.warning(
+                    f"User manager not available, cannot lock account for {username}"
+                )
+
         except Exception as e:
             logger.error(f"Error terminating sessions for {username}: {e}")
 

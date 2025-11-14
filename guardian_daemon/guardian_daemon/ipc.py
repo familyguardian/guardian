@@ -75,6 +75,8 @@ class GuardianIPCServer:
             "sync_users_from_config": self.handle_sync_users_from_config,
             "add_user": self.handle_add_user,
             "update_user": self.handle_update_user,
+            "unlock_user": self.handle_unlock_user,
+            "unlock_all": self.handle_unlock_all,
         }
 
     async def start(self):
@@ -652,6 +654,130 @@ class GuardianIPCServer:
             )
         except Exception as e:
             logger.error(f"Error updating user setting: {e}")
+            return json.dumps({"error": str(e)})
+
+    async def handle_unlock_user(self, username):
+        """
+        Unlock a specific user's account to allow login.
+
+        Args:
+            username: Username to unlock
+
+        Returns:
+            JSON response with success status or error message
+        """
+        try:
+            if not username:
+                return json.dumps({"error": "Username parameter is required"})
+
+            if not self.user_manager:
+                return json.dumps(
+                    {"error": "User manager not available in this context"}
+                )
+
+            # Validate username
+            if not self.user_manager.validate_username(username):
+                return json.dumps({"error": f"Invalid username: {username}"})
+
+            # Check if user exists
+            if not self.user_manager.user_exists(username):
+                return json.dumps({"error": f"User does not exist: {username}"})
+
+            # Check if user is managed
+            managed_users = list(self.policy.data.get("users", {}).keys())
+            if username not in managed_users:
+                return json.dumps(
+                    {
+                        "error": f"User '{username}' is not a managed user. Only managed users can be unlocked."
+                    }
+                )
+
+            # Check current lock status
+            is_locked = self.user_manager.check_if_locked(username)
+
+            if not is_locked:
+                logger.info(f"User {username} is not locked, no action needed")
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "message": f"User {username} was not locked",
+                        "username": username,
+                        "was_locked": False,
+                    }
+                )
+
+            # Unlock the user
+            success = self.user_manager.unlock_user_account(username)
+
+            if success:
+                logger.info(f"Successfully unlocked user {username}")
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "message": f"User {username} unlocked successfully",
+                        "username": username,
+                        "was_locked": True,
+                    }
+                )
+            else:
+                logger.error(f"Failed to unlock user {username}")
+                return json.dumps(
+                    {
+                        "error": f"Failed to unlock user {username}. Check daemon logs for details."
+                    }
+                )
+
+        except Exception as e:
+            logger.error(f"Error unlocking user {username}: {e}")
+            return json.dumps({"error": str(e)})
+
+    async def handle_unlock_all(self, _):
+        """
+        Emergency unlock all managed user accounts.
+
+        Returns:
+            JSON response with count of unlocked users and details
+        """
+        try:
+            if not self.user_manager:
+                return json.dumps(
+                    {"error": "User manager not available in this context"}
+                )
+
+            logger.warning("Emergency unlock-all command received")
+
+            # Get all managed users
+            managed_users = list(self.policy.data.get("users", {}).keys())
+
+            if not managed_users:
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "message": "No managed users to unlock",
+                        "unlocked_count": 0,
+                        "users": [],
+                    }
+                )
+
+            # Unlock all managed users
+            unlocked_count = self.user_manager.unlock_all_managed_users()
+
+            logger.info(
+                f"Emergency unlock-all completed: {unlocked_count} users unlocked"
+            )
+
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Unlocked {unlocked_count} of {len(managed_users)} managed users",
+                    "unlocked_count": unlocked_count,
+                    "total_managed": len(managed_users),
+                    "users": managed_users,
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Error in unlock-all command: {e}")
             return json.dumps({"error": str(e)})
 
     def close(self):
