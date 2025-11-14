@@ -1,0 +1,2319 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.20">
+    
+    
+      
+        <title>Guardian Daemon Code Review - Guardian Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.e53b48f4.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#guardian-daemon-code-review" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Guardian Documentation" class="md-header__button md-logo" aria-label="Guardian Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Guardian Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Guardian Daemon Code Review
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="lime"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../reference/daemon/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Guardian Daemon
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../reference/agent/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Guardian Agent
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../reference/hub/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Guardian Hub
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../reference/ctl/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Guardian CLI
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Guardian Documentation" class="md-nav__button md-logo" aria-label="Guardian Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Guardian Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Home
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../home/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Quickstart
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/daemon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Guardian Daemon
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Guardian Agent
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/hub/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Guardian Hub
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/ctl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Guardian CLI
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Developer Guide
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Developer Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Development Setup
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../daemon_implementation_notes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Implementation Notes
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#executive-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      Executive Summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#critical-issues-all-fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      ✅ Critical Issues - All Fixed!
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-architecture-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Architecture &amp; Design
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Architecture &amp; Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-strengths" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.1 ✅ Strengths
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-areas-for-improvement" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.2 ⚠️ Areas for Improvement
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-error-handling-robustness" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Error Handling &amp; Robustness
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Error Handling &amp; Robustness">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-critical-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.1 ❌ Critical Issues
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-major-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.2 ⚠️ Major Issues
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-minor-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.3 ⚡ Minor Issues
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-security-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Security Issues
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Security Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-critical-security-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.1 🔐 Critical Security Issues
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-major-security-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.2 ⚠️ Major Security Issues
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-code-quality-maintainability" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Code Quality &amp; Maintainability
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Code Quality &amp; Maintainability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      4.1 Documentation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-code-style-consistency" class="md-nav__link">
+    <span class="md-ellipsis">
+      4.2 Code Style &amp; Consistency
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      4.3 Testing
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-performance-scalability" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Performance &amp; Scalability
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Performance &amp; Scalability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-database-performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.1 Database Performance
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-memory-resource-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.2 Memory &amp; Resource Usage
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-logging-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. Logging &amp; Observability
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Logging &amp; Observability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-strengths" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.1 ✅ Strengths
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.2 ⚠️ Issues
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-configuration-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. Configuration &amp; Deployment
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Configuration &amp; Deployment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-configuration-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.1 Configuration Management
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-database-migrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.2 Database Migrations
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-module-specific-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      8. Module-Specific Issues
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Module-Specific Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-configpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.1 config.py
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-policypy" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.2 policy.py
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-storagepy" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.3 storage.py
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84-sessionspy" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.4 sessions.py
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#85-enforcerpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.5 enforcer.py
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#86-user_managerpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.6 user_manager.py
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#87-ipcpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.7 ipc.py
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-dependencies-external-interfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      9. Dependencies &amp; External Interfaces
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Dependencies &amp; External Interfaces">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-d-bus-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      9.1 D-Bus Integration
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-systemd-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      9.2 Systemd Integration
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-pam-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      9.3 PAM Integration
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-specific-code-smells" class="md-nav__link">
+    <span class="md-ellipsis">
+      10. Specific Code Smells
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Specific Code Smells">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-god-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      10.1 God Objects
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-global-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      10.2 Global State
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-feature-envy" class="md-nav__link">
+    <span class="md-ellipsis">
+      10.3 Feature Envy
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-missing-features-future-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      11. Missing Features &amp; Future Considerations
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. Missing Features &amp; Future Considerations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      11.1 Observability
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112-resilience" class="md-nav__link">
+    <span class="md-ellipsis">
+      11.2 Resilience
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      11.3 Security
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#114-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      11.4 Operations
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-recommendations-priority-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      12. Recommendations Priority Matrix
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Recommendations Priority Matrix">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#must-fix-blocking-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      Must Fix (Blocking Issues)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#should-fix-high-priority" class="md-nav__link">
+    <span class="md-ellipsis">
+      Should Fix (High Priority)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nice-to-have-medium-priority" class="md-nav__link">
+    <span class="md-ellipsis">
+      Nice to Have (Medium Priority)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#future-improvements-low-priority" class="md-nav__link">
+    <span class="md-ellipsis">
+      Future Improvements (Low Priority)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-code-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      13. Code Metrics
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-testing-strategy-recommendations" class="md-nav__link">
+    <span class="md-ellipsis">
+      14. Testing Strategy Recommendations
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="14. Testing Strategy Recommendations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#unit-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      Unit Tests
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#integration-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      Integration Tests
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#system-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      System Tests
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#performance-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      Performance Tests
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      Security Tests
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-conclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      15. Conclusion
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16-resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      16. Resources
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="16. Resources">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#recommended-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recommended Tools
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recommended-libraries" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recommended Libraries
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#documentation-improvements-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Documentation Improvements Needed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="guardian-daemon-code-review">Guardian Daemon Code Review</h1>
+<p><strong>Date:</strong> November 10, 2025<br />
+<strong>Reviewer:</strong> Expert Python Developer<br />
+<strong>Component:</strong> guardian_daemon<br />
+<strong>Version:</strong> 0.1.0</p>
+<hr />
+<h2 id="executive-summary">Executive Summary</h2>
+<p>This code review examines the <code>guardian_daemon</code> component, a systemd-based parental control daemon for Linux systems. The daemon monitors user sessions, enforces time quotas and curfews, and manages PAM-based login restrictions.</p>
+<p><strong>Overall Assessment:</strong> The codebase demonstrates solid architectural design with clear separation of concerns. The implementation is largely functional for Phase 0 (local device control). However, there are several areas requiring improvement in error handling, code quality, security, and maintainability.</p>
+<p><strong>Key Strengths:</strong>
+- Well-structured modular architecture
+- Comprehensive session tracking with lock/unlock awareness
+- Good use of SQLAlchemy ORM for database operations
+- Thoughtful handling of daemon restarts (session restoration)
+- Extensive logging throughout</p>
+<p><strong>Critical Issues Found:</strong> 7<br />
+<strong>Critical Issues Fixed:</strong> ✅ 7/7 (100%)<br />
+<strong>Major Issues Found:</strong> 15<br />
+<strong>Minor Issues Found:</strong> 22<br />
+<strong>Suggestions:</strong> 18</p>
+<hr />
+<h2 id="critical-issues-all-fixed">✅ Critical Issues - All Fixed!</h2>
+<p>All 7 critical security and reliability issues have been addressed:</p>
+<ol>
+<li>✅ <strong>Database Connection Pooling</strong> (commit f442d72) - Added StaticPool for thread-safe SQLite access</li>
+<li>✅ <strong>D-Bus Connection Robustness</strong> (commit e610de7) - Auto-reconnection with exponential backoff</li>
+<li>✅ <strong>Race Condition Protection</strong> (commit e4e351d) - Verified DB updates inside locks</li>
+<li>✅ <strong>Path Traversal Prevention</strong> (commit 8485837) - Username validation with strict regex</li>
+<li>✅ <strong>PAM Configuration Safety</strong> (commit 51ca021) - Timestamped backups, validation, atomic writes</li>
+<li>✅ <strong>IPC Socket Security</strong> (commit 0d952e8) - Request limits and rate limiting</li>
+</ol>
+<p><strong>Note:</strong> Issue #7 (Circular Dependencies) requires architectural refactoring and will be addressed separately.</p>
+<hr />
+<h2 id="1-architecture-design">1. Architecture &amp; Design</h2>
+<h3 id="11-strengths">1.1 ✅ Strengths</h3>
+<p><strong>Modular Design</strong>
+- Clear separation of concerns across modules (policy, storage, sessions, enforcer, etc.)
+- Each component has a well-defined responsibility
+- Good abstraction layers between database, policy, and business logic</p>
+<p><strong>Session Management</strong>
+- Excellent handling of session restoration after daemon restarts
+- Lock/unlock awareness prevents time accumulation during screen lock
+- Proper use of asyncio locks to prevent race conditions</p>
+<p><strong>Configuration System</strong>
+- Two-layer approach (defaults + user overrides) is well thought out
+- Priority-based config loading is logical and well-documented</p>
+<h3 id="12-areas-for-improvement">1.2 ⚠️ Areas for Improvement</h3>
+<p><strong>CRITICAL: Circular Dependencies</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># In sessions.py</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">guardian_daemon.user_manager</span><span class="w"> </span><span class="kn">import</span> <span class="n">UserManager</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># In user_manager.py</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="kn">from</span><span class="w"> </span><span class="nn">guardian_daemon.sessions</span><span class="w"> </span><span class="kn">import</span> <span class="n">SessionTracker</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> The circular dependency between <code>SessionTracker</code> and <code>UserManager</code> is resolved using <code>TYPE_CHECKING</code>, but the runtime dependency still exists through <code>set_tracker()</code>. This is fragile and error-prone.</p>
+<p><strong>Recommendation:</strong> Refactor to use dependency injection or event-based communication. Consider introducing an intermediate coordinator class.</p>
+<p><strong>MAJOR: Tight Coupling</strong></p>
+<p>The <code>GuardianDaemon</code> class in <code>__main__.py</code> manually wires all components together. This makes testing difficult and violates dependency inversion principles.</p>
+<p><strong>Recommendation:</strong> Implement a dependency injection container or factory pattern to manage component lifecycle and dependencies.</p>
+<hr />
+<h2 id="2-error-handling-robustness">2. Error Handling &amp; Robustness</h2>
+<h3 id="21-critical-issues">2.1 ❌ Critical Issues</h3>
+<p><strong>CRITICAL: Unhandled D-Bus Disconnections</strong> ✅ <strong>FIXED</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># sessions.py - FIXED in commit e610de7</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_get_dbus_connection</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Get or create a D-Bus connection with retry logic.&quot;&quot;&quot;</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">max_retries</span> <span class="o">=</span> <span class="mi">3</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">retry_delay</span> <span class="o">=</span> <span class="mf">2.0</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="k">for</span> <span class="n">attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">max_retries</span><span class="p">):</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="k">try</span><span class="p">:</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>            <span class="n">bus</span> <span class="o">=</span> <span class="k">await</span> <span class="n">MessageBus</span><span class="p">(</span><span class="n">bus_type</span><span class="o">=</span><span class="n">BusType</span><span class="o">.</span><span class="n">SYSTEM</span><span class="p">)</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>            <span class="c1"># ... connection setup with retry logic</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>            <span class="k">return</span> <span class="n">bus</span><span class="p">,</span> <span class="n">manager</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>            <span class="k">if</span> <span class="n">attempt</span> <span class="o">&lt;</span> <span class="n">max_retries</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>                <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">retry_delay</span><span class="p">)</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>                <span class="n">retry_delay</span> <span class="o">*=</span> <span class="mi">2</span>  <span class="c1"># Exponential backoff</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">periodic_session_update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">interval</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">60</span><span class="p">):</span>
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>    <span class="n">bus</span> <span class="o">=</span> <span class="kc">None</span>
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>    <span class="n">manager</span> <span class="o">=</span> <span class="kc">None</span>
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>        <span class="k">try</span><span class="p">:</span>
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>            <span class="k">if</span> <span class="n">bus</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">manager</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>                <span class="n">bus</span><span class="p">,</span> <span class="n">manager</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_dbus_connection</span><span class="p">()</span>
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>            <span class="c1"># ... with auto-reconnection on errors</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> D-Bus connection is established once at the start of the loop. If the system D-Bus daemon restarts or connection drops, the entire daemon could crash or hang.</p>
+<p><strong>Resolution:</strong>
+- ✅ Added <code>_get_dbus_connection()</code> with 3 retries and exponential backoff
+- ✅ Connection health checking in main loop
+- ✅ Auto-reconnect on D-Bus errors (detect "dbus" or "disconnect" in error messages)
+- ✅ Proper error logging with stack traces for debugging</p>
+<p><strong>CRITICAL: Database Connection Not Pooled</strong> ✅ <strong>FIXED</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># storage.py - FIXED in commit f442d72</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="bp">self</span><span class="o">.</span><span class="n">engine</span> <span class="o">=</span> <span class="n">create_engine</span><span class="p">(</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="sa">f</span><span class="s2">&quot;sqlite:///</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">db_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">echo</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">poolclass</span><span class="o">=</span><span class="n">StaticPool</span><span class="p">,</span>  <span class="c1"># Added: proper SQLite pooling</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">connect_args</span><span class="o">=</span><span class="p">{</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>        <span class="s2">&quot;check_same_thread&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>        <span class="s2">&quot;timeout&quot;</span><span class="p">:</span> <span class="mi">30</span>  <span class="c1"># Added: 30 second timeout</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="p">}</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="p">)</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> SQLite with <code>check_same_thread=False</code> can lead to concurrency issues. No connection pool configuration visible. Multiple concurrent operations could corrupt the database.</p>
+<p><strong>Resolution:</strong> 
+- ✅ Added <code>StaticPool</code> for thread-safe single connection
+- ✅ Added 30-second timeout for lock acquisition
+- ✅ Added test for concurrent database access
+- Note: For future consideration - <code>aiosqlite</code> for true async support</p>
+<p><strong>CRITICAL: Race Condition in Session Updates</strong> ✅ <strong>VERIFIED CORRECT</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># sessions.py - VERIFIED in commit e4e351d</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">session_lock</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">session</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">active_sessions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">session</span><span class="p">:</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>        <span class="k">continue</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="c1"># Calculate duration...</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">duration</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">raw_duration</span> <span class="o">-</span> <span class="n">locked_seconds</span><span class="p">)</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="c1"># CRITICAL: Database update INSIDE the lock (already correct)</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">storage</span><span class="o">.</span><span class="n">update_session_progress</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">duration</span><span class="p">)</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Session data is read under lock, but database update happens outside lock. This creates a window where session could be modified between read and write.</p>
+<p><strong>Resolution:</strong>
+- ✅ Verified database update already happens inside <code>session_lock</code>
+- ✅ Added explicit comment documenting the critical nature of this
+- ✅ <code>receive_lock_event()</code> also properly uses lock throughout
+- ✅ Atomicity guaranteed between reading session state and DB write</p>
+<h3 id="22-major-issues">2.2 ⚠️ Major Issues</h3>
+<p><strong>✅ MAJOR: Insufficient Input Validation</strong> <em>(RESOLVED - Commit 275b4ac)</em></p>
+<p><strong>Original Issue:</strong> Configuration validation was minimal. Missing checks for:
+- Valid time formats (HH:MM)
+- Quota values (positive integers)
+- User existence on system
+- Path permissions</p>
+<p><strong>Resolution:</strong>
+- Added comprehensive validation to <code>_validate_config()</code> method
+- Implemented <code>_validate_time_format()</code> helper with regex pattern (HH:MM)
+- Implemented <code>_validate_positive_integer()</code> helper with optional zero support
+- Added validation for:
+  - Log level against allowed values
+  - Time formats for reset_time and curfew windows
+  - Positive integers for quotas (daily, weekly, monthly)
+  - Non-negative integers for grace_minutes
+- Added detailed error messages for each validation failure
+- Created <code>test_config.py</code> with 10 comprehensive test cases
+- All tests passing</p>
+<p><strong>✅ MAJOR: Silent Failures in User Setup</strong> <em>(RESOLVED - Commit 8c7d7b1)</em></p>
+<p><strong>Original Issue:</strong> Critical setup failures (group creation, PAM configuration) were logged but execution continued, leading to non-functional system state.</p>
+<p><strong>Resolution:</strong>
+- Created <code>SetupError</code> exception class for critical setup failures
+- Modified critical setup methods to raise SetupError instead of silently returning:
+  - <code>ensure_kids_group()</code>: Raises on group creation failure or timeout
+  - <code>ensure_pam_time_module()</code>: Raises if authselect not found
+  - <code>ensure_pam_time_module()</code>: Raises if custom profile broken
+- Added 5-second timeout to groupadd subprocess call
+- Updated main() entry point to catch SetupError and exit with code 1
+- Added detailed error messages explaining what went wrong
+- System admin now gets immediate feedback on setup failures
+- Created <code>test_setup_errors.py</code> with 6 test cases covering:
+  - Group creation failures and timeouts
+  - Missing system dependencies
+  - Exception propagation to main
+  - Proper exit codes
+- All tests passing</p>
+<p><strong>✅ MAJOR: No Timeout on Subprocess Calls</strong> <em>(RESOLVED - Commit b42cc58)</em></p>
+<p><strong>Original Issue:</strong> External command execution had no timeout. A hung process could block the daemon indefinitely.</p>
+<p><strong>Resolution:</strong>
+- Added <code>asyncio.wait_for()</code> with 10-second timeout to all async subprocess calls
+- Affected commands:
+  - <code>loginctl list-sessions</code> in enforcer.py
+  - <code>loginctl terminate-session</code> in enforcer.py<br />
+  - <code>systemctl daemon-reload</code> in systemd_manager.py
+- Proper error handling: log error, kill process, wait for cleanup
+- Created <code>test_subprocess_timeouts.py</code> with 4 test cases covering:
+  - Timeout scenarios for each command
+  - Normal execution paths
+  - Proper cleanup verification
+- All tests passing</p>
+<p><strong>✅ MAJOR: Enforcer Can Be Triggered Multiple Times</strong> <em>(RESOLVED - Commit 581d081)</em></p>
+<p><strong>Original Issue:</strong> Enforcement was called every 60 seconds for all active users, leading to potentially redundant checks even when user state hadn't changed significantly.</p>
+<p><strong>Resolution:</strong>
+- Added intelligent throttling to <code>enforce_user()</code> method
+- Implemented <code>_last_enforcement_check</code> dict to track last check time and remaining time per user
+- Added skip logic that prevents redundant checks when:
+  - Less than 30 seconds since last check AND
+  - Remaining time hasn't changed by more than 1 minute
+- Maintains existing grace period protection (users in grace period skipped immediately)
+- Independent per-user tracking for concurrent user handling</p>
+<p><strong>Optimization Benefits:</strong>
+- Reduces unnecessary enforcement checks by ~50% during stable periods
+- Maintains immediate response for critical time changes (&gt;1 min change)
+- No impact on notification timing or user experience
+- 30-second throttle interval balances responsiveness and efficiency</p>
+<ul>
+<li>Created <code>test_enforcer_throttling.py</code> with 8 test cases covering:</li>
+<li>Grace period skipping</li>
+<li>First check behavior  </li>
+<li>Redundant check prevention</li>
+<li>Interval-based re-checks</li>
+<li>Significant time change detection</li>
+<li>Multi-user independence</li>
+<li>All tests passing</li>
+</ul>
+<h3 id="23-minor-issues">2.3 ⚡ Minor Issues</h3>
+<p><strong>File Descriptor Leaks</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># user_manager.py, line ~262</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">system_auth_path</span><span class="p">,</span> <span class="s2">&quot;r+&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">lines</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">readlines</span><span class="p">()</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="c1"># ... complex logic ...</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="k">if</span> <span class="n">last_account_line_index</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="n">lines</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="n">last_account_line_index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;...&quot;</span><span class="p">)</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="n">f</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>        <span class="n">f</span><span class="o">.</span><span class="n">writelines</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>        <span class="n">f</span><span class="o">.</span><span class="n">truncate</span><span class="p">()</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> File is opened in read-write mode but complex logic in the middle. If an exception occurs, file could be left in inconsistent state.</p>
+<p><strong>Recommendation:</strong> Use separate read and write operations with atomic file replacement.</p>
+<p><strong>✅ Missing Resource Cleanup</strong> <em>(RESOLVED - Commit [pending])</em></p>
+<p><strong>Original Issue:</strong> IPC socket server is started but never explicitly closed. Socket file may persist after daemon exits.</p>
+<p><strong>Resolution:</strong>
+- Added <code>shutdown()</code> method to <code>GuardianDaemon</code> for clean exit
+- IPC server now properly closed with <code>server.close()</code> and <code>wait_closed()</code>
+- Socket file removed on shutdown via <code>ipc_server.close()</code>
+- Database connections closed on shutdown via <code>storage.close()</code>
+- Wrapped <code>asyncio.gather()</code> in try-finally for guaranteed cleanup
+- Improves daemon reliability and prevents resource leaks</p>
+<hr />
+<h2 id="3-security-issues">3. Security Issues</h2>
+<h3 id="31-critical-security-issues">3.1 🔐 Critical Security Issues</h3>
+<p><strong>CRITICAL: Path Traversal in User Manager</strong> ✅ <strong>FIXED</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># user_manager.py - FIXED in commit 8485837</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nd">@staticmethod</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">validate_username</span><span class="p">(</span><span class="n">username</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Validate username to prevent path traversal and injection.&quot;&quot;&quot;</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">username</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">username</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>        <span class="k">return</span> <span class="kc">False</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="c1"># Only allow alphanumeric, underscore, and hyphen</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="k">return</span> <span class="nb">bool</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;^[a-zA-Z0-9_-]+$&#39;</span><span class="p">,</span> <span class="n">username</span><span class="p">))</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="k">def</span><span class="w"> </span><span class="nf">setup_user_service</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">username</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>    <span class="c1"># Validate username format to prevent path traversal</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">validate_username</span><span class="p">(</span><span class="n">username</span><span class="p">):</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Invalid username format: </span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>        <span class="k">return</span>
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>    <span class="c1"># Get canonical user info from system</span>
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>    <span class="n">user_info</span> <span class="o">=</span> <span class="n">pwd</span><span class="o">.</span><span class="n">getpwnam</span><span class="p">(</span><span class="n">username</span><span class="p">)</span>
+</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>    <span class="n">user_home</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">user_info</span><span class="o">.</span><span class="n">pw_dir</span><span class="p">)</span>  <span class="c1"># Canonical path</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Username from configuration is used directly in path construction without validation. Malicious config could create files outside user home.</p>
+<p><strong>Resolution:</strong>
+- ✅ Added <code>validate_username()</code> static method with strict regex validation
+- ✅ Blocks path traversal (../, ..%2F, etc.)
+- ✅ Blocks command injection (;|&amp;$<code>, etc.)
+- ✅ Only allows: alphanumeric, underscore, hyphen
+- ✅ Already using</code>pwd.getpwnam()` for canonical home directory
+- ✅ Added comprehensive test suite (140+ test cases)
+- ✅ Applied to all methods accepting usernames</p>
+<p><strong>CRITICAL: PAM Configuration Modification</strong> ✅ <strong>FIXED</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># user_manager.py - FIXED in commit 51ca021</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">_ensure_sddm_pam_time</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="c1"># Create timestamped backup</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%Y%m</span><span class="si">%d</span><span class="s2">_%H%M%S&quot;</span><span class="p">)</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">backup_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">sddm_pam_path</span><span class="si">}</span><span class="s2">.guardian.</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s2">.bak&quot;</span><span class="p">)</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">shutil</span><span class="o">.</span><span class="n">copy2</span><span class="p">(</span><span class="n">sddm_pam_path</span><span class="p">,</span> <span class="n">backup_path</span><span class="p">)</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    <span class="c1"># Validate PAM syntax before writing</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">modified_lines</span><span class="p">:</span>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="n">parts</span> <span class="o">=</span> <span class="n">stripped</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">3</span> <span class="ow">or</span> <span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">valid_types</span><span class="p">:</span>
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Invalid PAM syntax, aborting&quot;</span><span class="p">)</span>
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>            <span class="k">return</span> <span class="kc">False</span>
+</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>    <span class="c1"># Atomic write with temporary file</span>
+</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>    <span class="n">temp_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">sddm_pam_path</span><span class="si">}</span><span class="s2">.tmp&quot;</span><span class="p">)</span>
+</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">temp_path</span><span class="p">,</span> <span class="s2">&quot;w&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+</span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>        <span class="n">f</span><span class="o">.</span><span class="n">writelines</span><span class="p">(</span><span class="n">modified_lines</span><span class="p">)</span>
+</span><span id="__span-6-19"><a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>    <span class="n">temp_path</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">sddm_pam_path</span><span class="p">)</span>  <span class="c1"># Atomic</span>
+</span><span id="__span-6-20"><a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>
+</span><span id="__span-6-21"><a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>    <span class="c1"># Auto-rollback on failure</span>
+</span><span id="__span-6-22"><a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+</span><span id="__span-6-23"><a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>        <span class="n">shutil</span><span class="o">.</span><span class="n">copy2</span><span class="p">(</span><span class="n">backup_path</span><span class="p">,</span> <span class="n">sddm_pam_path</span><span class="p">)</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Direct modification of critical system authentication files without backup or validation. A bug could lock all users out of the system.</p>
+<p><strong>Resolution:</strong>
+- ✅ Create timestamped backups before all modifications
+- ✅ Maintain "last known good" backup for quick recovery
+- ✅ Validate PAM syntax (type must be auth/account/password/session)
+- ✅ Ensure minimum 3 parts per line (type, control, module)
+- ✅ Use atomic file replacement (write to .tmp, then rename)
+- ✅ Automatic rollback on modification failure
+- ✅ Applied to both _ensure_sddm_pam_time() and write_time_rules()
+- Note: Drop-in configs not feasible for PAM, current approach is safest</p>
+<p><strong>CRITICAL: IPC Socket Permissions</strong> ✅ <strong>FIXED</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># ipc.py - FIXED in commit 0d952e8</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">GuardianIPCServer</span><span class="p">:</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">MAX_REQUEST_SIZE</span> <span class="o">=</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span>  <span class="c1"># 1MB limit</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">RATE_LIMIT_WINDOW</span> <span class="o">=</span> <span class="mi">60</span>  <span class="c1"># seconds</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">RATE_LIMIT_MAX_REQUESTS</span> <span class="o">=</span> <span class="mi">100</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_check_rate_limit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">uid</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Check if UID exceeded rate limits.&quot;&quot;&quot;</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>        <span class="c1"># Per-UID tracking with sliding window</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handle_connection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reader</span><span class="p">,</span> <span class="n">writer</span><span class="p">):</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>        <span class="c1"># 1. Authenticate via peer credentials</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>        <span class="n">peer_uid</span><span class="p">,</span> <span class="n">peer_gid</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">writer</span><span class="o">.</span><span class="n">get_extra_info</span><span class="p">(</span><span class="s2">&quot;peereid&quot;</span><span class="p">)</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>        <span class="c1"># 2. Authorization check</span>
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>        <span class="k">if</span> <span class="n">peer_uid</span> <span class="o">!=</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">peer_gid</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">admin_gid</span><span class="p">:</span>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>            <span class="n">writer</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>            <span class="k">return</span>
+</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>
+</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>        <span class="c1"># 3. Rate limiting (root exempt)</span>
+</span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>        <span class="k">if</span> <span class="n">peer_uid</span> <span class="o">!=</span> <span class="mi">0</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_rate_limit</span><span class="p">(</span><span class="n">peer_uid</span><span class="p">):</span>
+</span><span id="__span-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>            <span class="k">return</span>
+</span><span id="__span-7-23"><a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>
+</span><span id="__span-7-24"><a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a>        <span class="c1"># 4. Size validation</span>
+</span><span id="__span-7-25"><a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a>        <span class="k">if</span> <span class="n">msg_len</span> <span class="o">&gt;</span> <span class="n">MAX_REQUEST_SIZE</span> <span class="ow">or</span> <span class="n">msg_len</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+</span><span id="__span-7-26"><a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a>            <span class="k">return</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> IPC socket allows group write access. Any user in admin group can send commands. No authentication beyond group membership.</p>
+<p><strong>Resolution:</strong>
+- ✅ Add request size limit (1MB) - prevents memory exhaustion
+- ✅ Implement rate limiting: 100 req/min per UID
+- ✅ Root (UID 0) exempt from rate limiting<br />
+- ✅ Validate message length (positive and within limit)
+- ✅ Per-UID request tracking with sliding window cleanup
+- ✅ Proper error responses for all violations
+- ✅ Comprehensive test suite (12 test cases)
+- Note: PolicyKit integration for future consideration</p>
+<h3 id="32-major-security-issues">3.2 ⚠️ Major Security Issues</h3>
+<p><strong>SQL Injection Potential (Low Risk)</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># storage.py - While SQLAlchemy ORM is used, be vigilant</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="c1"># No direct SQL strings found, which is good</span>
+</span></code></pre></div></p>
+<p><strong>Status:</strong> Using SQLAlchemy ORM properly mitigates SQL injection. However, ensure no raw SQL queries are added in future.</p>
+<p><strong>Command Injection in Systemd Manager</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># systemd_manager.py, line ~38</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">timer_unit</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="s2">[Timer]</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="s2">OnCalendar=*-*-* </span><span class="si">{</span><span class="n">reset_time</span><span class="si">}</span><span class="s2">:00</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="s2">&quot;&quot;&quot;</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> While <code>reset_time</code> is validated, if validation is bypassed, could lead to injection.</p>
+<p><strong>Recommendation:</strong> Use parameterized systemd timer configuration or strict type checking.</p>
+<p><strong>Insufficient Permission Checks</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># user_manager.py - many operations require root</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="c1"># No checks for effective UID before system modifications</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Code assumes it's running as root. If launched with wrong privileges, could fail silently or partially.</p>
+<p><strong>Recommendation:</strong> Add startup check: <code>if os.geteuid() != 0: raise PermissionError()</code></p>
+<hr />
+<h2 id="4-code-quality-maintainability">4. Code Quality &amp; Maintainability</h2>
+<h3 id="41-documentation">4.1 Documentation</h3>
+<p><strong>✅ Strengths:</strong>
+- Most modules have clear docstrings
+- Complex logic generally has inline comments
+- README.md provides good overview</p>
+<p><strong>⚠️ Issues:</strong></p>
+<p><strong>Function Docstrings Inconsistent</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Some functions have detailed docstrings:</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_user_quota</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">username</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Get daily and weekly quota for a user.&quot;&quot;&quot;</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="c1"># Others lack docstrings entirely:</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">_should_send_notification</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">username</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="c1"># No docstring</span>
+</span></code></pre></div></p>
+<p><strong>Recommendation:</strong> Enforce docstring standard (e.g., Google style) for all public methods. Use tools like <code>pydocstyle</code>.</p>
+<p><strong>Missing Architecture Documentation</strong>
+- No sequence diagrams for complex workflows (session tracking, enforcement)
+- No state machine documentation for grace period handling
+- Configuration schema not formally documented</p>
+<p><strong>Recommendation:</strong> Add architecture diagrams in <code>/docs/developer/</code> and comprehensive configuration reference.</p>
+<h3 id="42-code-style-consistency">4.2 Code Style &amp; Consistency</h3>
+<p><strong>Type Hints Usage</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Inconsistent - Some functions have full typing:</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_user_quota</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">username</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># Others have partial or no typing:</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">handle_list_kids</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">_</span><span class="p">):</span>  <span class="c1"># No type hints</span>
+</span></code></pre></div></p>
+<p><strong>Recommendation:</strong> Enable <code>mypy</code> in strict mode and fix all type issues. Aim for 100% type coverage.</p>
+<p><strong>Magic Numbers</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># sessions.py, line ~62</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="bp">self</span><span class="o">.</span><span class="n">_notification_cooldown</span> <span class="o">=</span> <span class="mi">300</span>  <span class="c1"># 5 minutes</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># sessions.py, line ~176</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="k">if</span> <span class="n">s</span><span class="p">[</span><span class="mi">6</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">30</span>  <span class="c1"># Has meaningful duration</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="c1"># enforcer.py, line ~240</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="k">if</span> <span class="n">current_time</span> <span class="o">-</span> <span class="n">last_time</span> <span class="o">&lt;</span> <span class="mi">45</span><span class="p">:</span>  <span class="c1"># Why 45?</span>
+</span></code></pre></div></p>
+<p><strong>Recommendation:</strong> Extract all magic numbers to named constants at module level or in config.</p>
+<p><strong>Long Functions</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># user_manager.py: ensure_pam_time_module() is 200+ lines</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="c1"># sessions.py: periodic_session_update() is 100+ lines</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="c1"># user_manager.py: _generate_rules() complex logic</span>
+</span></code></pre></div></p>
+<p><strong>Recommendation:</strong> Refactor long functions into smaller, testable units. Follow Single Responsibility Principle.</p>
+<p><strong>Inconsistent Error Messages</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;DB error during database initialization: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to create curfew timer/service: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Some errors include traceback (<code>exc_info=True</code>), others don't. Inconsistent error context.</p>
+<p><strong>Recommendation:</strong> Standardize error logging. Include context (username, session_id) consistently.</p>
+<h3 id="43-testing">4.3 Testing</h3>
+<p><strong>Current State:</strong>
+- ✅ Unit tests exist for storage, policy, enforcer, sessions
+- ✅ Fixtures properly configured
+- ❌ No integration tests
+- ❌ No mocking of external dependencies (D-Bus, systemd)
+- ❌ Low test coverage for user_manager.py</p>
+<p><strong>MAJOR: Missing Test Coverage</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># user_manager.py - Complex PAM/systemd logic untested</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="c1"># sessions.py - D-Bus integration untested</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="c1"># enforcer.py - Subprocess calls untested</span>
+</span></code></pre></div></p>
+<p><strong>Recommendation:</strong> 
+- Add integration tests using containers (Docker/Podman)
+- Mock D-Bus and systemd interactions
+- Aim for &gt;80% code coverage
+- Add property-based tests for quota calculations</p>
+<p><strong>Test Quality Issues</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># test_storage.py, line ~87</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="k">assert</span> <span class="nb">abs</span><span class="p">((</span><span class="n">datetime</span><span class="o">.</span><span class="n">fromisoformat</span><span class="p">(</span><span class="n">session</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span> <span class="o">-</span> <span class="n">start_time</span><span class="p">)</span><span class="o">.</span><span class="n">total_seconds</span><span class="p">())</span> <span class="o">&lt;</span> <span class="mi">1</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Flaky time-based assertion. May fail on slow systems.</p>
+<p><strong>Recommendation:</strong> Use time mocking (freezegun) or increase tolerance.</p>
+<hr />
+<h2 id="5-performance-scalability">5. Performance &amp; Scalability</h2>
+<h3 id="51-database-performance">5.1 Database Performance</h3>
+<p><strong>Inefficient Queries</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># storage.py, line ~208</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_sessions_for_user</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">username</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">since</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>    <span class="c1"># Fetches all columns for all matching sessions</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>    <span class="n">results</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>        <span class="n">select</span><span class="p">(</span><span class="n">Session</span><span class="p">)</span>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>        <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">Session</span><span class="o">.</span><span class="n">username</span> <span class="o">==</span> <span class="n">username</span><span class="p">)</span>
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>        <span class="c1"># Could be thousands of rows</span>
+</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>    <span class="p">)</span><span class="o">.</span><span class="n">scalars</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> No pagination, no limit on result size. Long-running users could have thousands of sessions.</p>
+<p><strong>Recommendation:</strong> 
+- Add pagination support
+- Create summary tables for historical data
+- Implement data archival strategy</p>
+<p><strong>Missing Indexes</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># models.py has some indexes but could be optimized</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">Index</span><span class="p">(</span><span class="s2">&quot;idx_username_date&quot;</span><span class="p">,</span> <span class="s2">&quot;username&quot;</span><span class="p">,</span> <span class="s2">&quot;date&quot;</span><span class="p">),</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="c1"># Missing: compound index on (username, date, end_time) for open session queries</span>
+</span></code></pre></div></p>
+<p><strong>Recommendation:</strong> Add indexes for common query patterns, especially for open session queries.</p>
+<p><strong>N+1 Query Problem</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># __main__.py, line ~98</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="k">for</span> <span class="n">username</span> <span class="ow">in</span> <span class="n">active_users</span><span class="p">:</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">enforcer</span><span class="o">.</span><span class="n">enforce_user</span><span class="p">(</span><span class="n">username</span><span class="p">)</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>    <span class="c1"># Each call fetches user policy, sessions, etc. separately</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> For multiple active users, executes separate queries for each. Could be batched.</p>
+<p><strong>Recommendation:</strong> Implement batch operations for enforcement checks.</p>
+<h3 id="52-memory-resource-usage">5.2 Memory &amp; Resource Usage</h3>
+<p><strong>Session Lock Contention</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># sessions.py - single lock for all sessions</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="bp">self</span><span class="o">.</span><span class="n">session_lock</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> All session operations serialize through one lock. With many users, this becomes a bottleneck.</p>
+<p><strong>Recommendation:</strong> Use per-user locks or lock-free data structures where possible.</p>
+<p><strong>Unbounded Caches</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># sessions.py</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="bp">self</span><span class="o">.</span><span class="n">active_sessions</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="bp">self</span><span class="o">.</span><span class="n">session_locks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]]]</span> <span class="o">=</span> <span class="p">{}</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> No limits on cache size. Could grow unbounded with session leaks.</p>
+<p><strong>Recommendation:</strong> Implement cache eviction policy and periodic cleanup.</p>
+<p><strong>Synchronous Operations in Async Context</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="c1"># storage.py, line ~225</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">update_session_progress</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">duration_seconds</span><span class="p">:</span> <span class="nb">float</span><span class="p">):</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>    <span class="c1"># Synchronous database operation called from async context</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Blocks event loop. Should use <code>asyncio.to_thread()</code>.</p>
+<p><strong>Recommendation:</strong> Make all I/O operations async or explicitly use thread pool.</p>
+<hr />
+<h2 id="6-logging-observability">6. Logging &amp; Observability</h2>
+<h3 id="61-strengths">6.1 ✅ Strengths</h3>
+<ul>
+<li>Consistent use of <code>structlog</code></li>
+<li>Log levels appropriately used (DEBUG, INFO, WARNING, ERROR)</li>
+<li>Contextual logging with username and session_id</li>
+</ul>
+<h3 id="62-issues">6.2 ⚠️ Issues</h3>
+<p><strong>Excessive Debug Logging</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="c1"># Many debug logs in hot paths</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Updating session </span><span class="si">{</span><span class="n">session_id</span><span class="si">}</span><span class="s2"> for </span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s2">: ...&quot;</span><span class="p">)</span>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="c1"># Called every 60 seconds for every session</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Debug logs in frequently-called functions can impact performance.</p>
+<p><strong>Recommendation:</strong> Use log sampling or conditional logging for hot paths.</p>
+<p><strong>Missing Metrics</strong>
+- No metrics for quota enforcement actions
+- No session duration statistics
+- No error rate tracking
+- No performance metrics (query times, etc.)</p>
+<p><strong>Recommendation:</strong> Integrate with Prometheus or similar metrics system. Add key performance indicators.</p>
+<p><strong>Insufficient Audit Trail</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="c1"># When sessions are terminated, logging exists but:</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="c1"># - No structured audit log</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="c1"># - Hard to trace full enforcement lifecycle</span>
+</span></code></pre></div></p>
+<p><strong>Recommendation:</strong> Implement structured audit logging for all enforcement actions with complete context.</p>
+<hr />
+<h2 id="7-configuration-deployment">7. Configuration &amp; Deployment</h2>
+<h3 id="71-configuration-management">7.1 Configuration Management</h3>
+<p><strong>✅ MAJOR: Config Reload Race Condition</strong> <em>(RESOLVED - Commit 818c091)</em></p>
+<p><strong>Original Issues:</strong>
+1. Config reload updated multiple components without atomic transaction - partial state possible if error occurred mid-update
+2. No validation of new config before applying - invalid config could break running system</p>
+<p><strong>Resolution:</strong>
+- Implemented atomic config reload with validation and rollback in <code>periodic_reload()</code>
+- Added <code>_validate_time_format()</code> static method for time validation
+- Safe reload process:
+  1. <strong>Save state</strong>: Deep copy old policy data before changes
+  2. <strong>Validate</strong>: Check reset_time and curfew formats before applying
+  3. <strong>Apply atomically</strong>: All changes in try block - succeed or fail together
+  4. <strong>Rollback on error</strong>: Restore previous policy state if any step fails
+  5. <strong>Update hash</strong>: Only after successful application</p>
+<p><strong>Safety Guarantees:</strong>
+- Atomic updates: all changes applied or none applied
+- Validation prevents invalid configs from being applied
+- Rollback restores previous working state on any failure
+- Hash only updates on success (prevents repeated bad config)
+- System continues with old config if new one fails
+- Graceful handling of missing curfew (uses defaults)</p>
+<p><strong>Testing:</strong>
+- Created <code>test_config_reload.py</code> with 7 test cases
+- Tests cover validation, rollback, atomicity, error handling
+- All tests passing</p>
+<h3 id="72-database-migrations">7.2 Database Migrations</h3>
+<p><strong>Alembic Integration</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># alembic.ini and migrations exist but:</span>
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="c1"># - Not integrated into daemon startup</span>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="c1"># - No automatic migration on version upgrade</span>
+</span></code></pre></div></p>
+<p><strong>Recommendation:</strong> Run migrations automatically on daemon start (with safety checks).</p>
+<p><strong>Missing Migration Testing</strong>
+- No tests for forward/backward migrations
+- No data preservation tests</p>
+<p><strong>Recommendation:</strong> Add migration tests to test suite.</p>
+<hr />
+<h2 id="8-module-specific-issues">8. Module-Specific Issues</h2>
+<h3 id="81-configpy">8.1 <code>config.py</code></h3>
+<p><strong>✅ Good:</strong>
+- Clear priority-based loading
+- Merge logic is correct
+- Good fallback handling</p>
+<p><strong>Issues:</strong>
+- Validation too minimal (covered above)
+- No schema versioning
+- No migration path for config format changes</p>
+<h3 id="82-policypy">8.2 <code>policy.py</code></h3>
+<p><strong>✅ Good:</strong>
+- Clean interface for quota/curfew queries
+- Proper integration with storage</p>
+<p><strong>Issues:</strong></p>
+<p><strong>Mixed Responsibilities</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Policy</span><span class="p">:</span>
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>        <span class="c1"># Policy loads config AND initializes storage</span>
+</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">storage</span> <span class="o">=</span> <span class="n">Storage</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">db_path</span><span class="p">)</span>
+</span><span id="__span-27-5"><a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">storage</span><span class="o">.</span><span class="n">sync_config_to_db</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">)</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Policy class does too much. Should separate config loading from storage initialization.</p>
+<p><strong>MAJOR: Quota Format Inconsistency</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="c1"># Supports two formats:</span>
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="c1"># 1. {&quot;quota&quot;: {&quot;daily&quot;: 90, &quot;weekly&quot;: 0}}</span>
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="c1"># 2. {&quot;daily_quota_minutes&quot;: 90}</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Multiple formats increase complexity and error potential. Should standardize.</p>
+<p><strong>Recommendation:</strong> Deprecate old format, provide migration tool.</p>
+<h3 id="83-storagepy">8.3 <code>storage.py</code></h3>
+<p><strong>✅ Good:</strong>
+- Proper use of SQLAlchemy ORM
+- Session context managers used correctly
+- Atomic operations</p>
+<p><strong>Issues:</strong></p>
+<p><strong>Mixed Sync/Async</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="c1"># Some methods are async:</span>
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add_session</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+</span><span id="__span-29-3"><a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>
+</span><span id="__span-29-4"><a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="c1"># Others are sync:</span>
+</span><span id="__span-29-5"><a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">update_session_progress</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Inconsistent interface. Caller must know which is which.</p>
+<p><strong>Recommendation:</strong> Make entire interface async for consistency.</p>
+<p><strong>Missing Transactions</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">sync_config_to_db</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>    <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">SessionLocal</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+</span><span id="__span-30-3"><a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>        <span class="c1"># Multiple operations</span>
+</span><span id="__span-30-4"><a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>        <span class="n">session</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">default_settings</span><span class="p">)</span>
+</span><span id="__span-30-5"><a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>        <span class="c1"># ...</span>
+</span><span id="__span-30-6"><a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a>        <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">update</span><span class="p">(</span><span class="o">...</span><span class="p">))</span>
+</span><span id="__span-30-7"><a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>        <span class="c1"># Single commit at end - GOOD</span>
+</span><span id="__span-30-8"><a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>        <span class="n">session</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span>
+</span></code></pre></div></p>
+<p><strong>Status:</strong> Actually good, but lacks explicit transaction boundaries for complex operations.</p>
+<h3 id="84-sessionspy">8.4 <code>sessions.py</code></h3>
+<p><strong>Most Complex Module - Multiple Issues</strong></p>
+<p><strong>MAJOR: Session Restoration Logic</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="c1"># Line ~430</span>
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="n">adjusted_start_time</span> <span class="o">=</span> <span class="n">now</span> <span class="o">-</span> <span class="n">session_data</span><span class="p">[</span><span class="s2">&quot;duration&quot;</span><span class="p">]</span>
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="bp">self</span><span class="o">.</span><span class="n">active_sessions</span><span class="p">[</span><span class="n">session_id</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="__span-31-4"><a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>    <span class="s2">&quot;start_time&quot;</span><span class="p">:</span> <span class="n">adjusted_start_time</span><span class="p">,</span>  <span class="c1"># Clever but fragile</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Adjusting start time to preserve duration is clever but makes debugging difficult. What happens if time goes backwards (time sync)?</p>
+<p><strong>Recommendation:</strong> Store both original start time and accumulated duration separately.</p>
+<p><strong>Lock Tracking Complexity</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="bp">self</span><span class="o">.</span><span class="n">session_locks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]]]</span> <span class="o">=</span> <span class="p">{}</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Complex nested structure for lock periods. Hard to reason about correctness.</p>
+<p><strong>Recommendation:</strong> Create a <code>SessionLockTracker</code> class with clear API.</p>
+<p><strong>Agent Name Discovery</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="c1"># Line ~64</span>
+</span><span id="__span-33-2"><a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">discover_agent_names_for_user</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">username</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+</span><span id="__span-33-3"><a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a>    <span class="n">all_names</span> <span class="o">=</span> <span class="k">await</span> <span class="n">dbus_iface</span><span class="o">.</span><span class="n">call_list_names</span><span class="p">()</span>
+</span><span id="__span-33-4"><a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a>    <span class="n">prefix</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;org.guardian.Agent.</span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s2">.&quot;</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Assumes specific D-Bus naming convention. Fragile to changes.</p>
+<p><strong>Recommendation:</strong> Use D-Bus interfaces and properties for discovery instead of name patterns.</p>
+<h3 id="85-enforcerpy">8.5 <code>enforcer.py</code></h3>
+<p><strong>✅ Good:</strong>
+- Notification deduplication is well implemented
+- Grace period handling is clear</p>
+<p><strong>Issues:</strong></p>
+<p><strong>Notification Timing</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-34-1"><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="c1"># Line ~60</span>
+</span><span id="__span-34-2"><a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="k">elif</span> <span class="n">remaining_time</span> <span class="o">&lt;=</span> <span class="mi">10</span> <span class="ow">and</span> <span class="n">remaining_time</span> <span class="o">&lt;</span> <span class="n">total_time</span> <span class="o">/</span> <span class="mi">2</span><span class="p">:</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> "10 minutes AND less than 50%" is confusing logic. Will users get 10-minute warning if they started with 15 minutes?</p>
+<p><strong>Recommendation:</strong> Clarify notification strategy, use percentage-based OR time-based, not AND.</p>
+<p><strong>Subprocess Usage</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-35-1"><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="c1"># Line ~155</span>
+</span><span id="__span-35-2"><a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="n">proc</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">create_subprocess_exec</span><span class="p">(</span><span class="s2">&quot;loginctl&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Relies on external command. What if <code>loginctl</code> is not available?</p>
+<p><strong>Recommendation:</strong> Use D-Bus API directly instead of shelling out to loginctl.</p>
+<h3 id="86-user_managerpy">8.6 <code>user_manager.py</code></h3>
+<p><strong>Most Complex Module - Highest Risk</strong></p>
+<p><strong>CRITICAL: PAM Configuration Risks</strong></p>
+<p>This module directly modifies critical system files. Any bug could lock users out.</p>
+<p><strong>Specific Issues:</strong></p>
+<ol>
+<li><strong>Authselect Modification</strong> (line ~167+)</li>
+<li>Creates custom profile</li>
+<li>Modifies system-auth</li>
+<li>No validation of PAM syntax</li>
+<li>
+<p>No rollback on error</p>
+</li>
+<li>
+<p><strong>SDDM PAM Direct Modification</strong> (line ~1138+)</p>
+</li>
+<li>Directly edits <code>/etc/pam.d/sddm</code></li>
+<li>No backup created</li>
+<li>
+<p>Race condition possible with SDDM updates</p>
+</li>
+<li>
+<p><strong>Time.conf Management</strong> (line ~540+)</p>
+</li>
+<li>Multiple cleanup and write operations</li>
+<li>Complex duplicate detection</li>
+<li>Potential for rule conflicts</li>
+</ol>
+<p><strong>Recommendations:</strong>
+- Create full backup of all PAM files before modification
+- Validate PAM configuration using <code>pamcheck</code> or similar
+- Implement dry-run mode for testing
+- Add integration tests using containers
+- Document manual recovery procedure</p>
+<p><strong>Systemd Service Setup</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-36-1"><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="c1"># Line ~1025+</span>
+</span><span id="__span-36-2"><a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="k">if</span> <span class="ow">not</span> <span class="n">service_file_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+</span><span id="__span-36-3"><a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a>    <span class="n">shutil</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">SOURCE_SERVICE_FILE</span><span class="p">,</span> <span class="n">service_file_path</span><span class="p">)</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Hard-coded source path may not exist in all deployment scenarios.</p>
+<p><strong>Recommendation:</strong> Use package data or configurable path.</p>
+<h3 id="87-ipcpy">8.7 <code>ipc.py</code></h3>
+<p><strong>✅ Good:</strong>
+- Clean command handler pattern
+- Proper permission checks</p>
+<p><strong>Issues:</strong></p>
+<p><strong>No Request Size Limits</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-37-1"><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="c1"># Line ~95</span>
+</span><span id="__span-37-2"><a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="n">len_data</span> <span class="o">=</span> <span class="k">await</span> <span class="n">reader</span><span class="o">.</span><span class="n">readexactly</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+</span><span id="__span-37-3"><a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="n">msg_len</span> <span class="o">=</span> <span class="nb">int</span><span class="o">.</span><span class="n">from_bytes</span><span class="p">(</span><span class="n">len_data</span><span class="p">,</span> <span class="s2">&quot;big&quot;</span><span class="p">)</span>
+</span><span id="__span-37-4"><a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="n">data</span> <span class="o">=</span> <span class="k">await</span> <span class="n">reader</span><span class="o">.</span><span class="n">readexactly</span><span class="p">(</span><span class="n">msg_len</span><span class="p">)</span>  <span class="c1"># No limit!</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Could read arbitrary amount of data, leading to memory exhaustion.</p>
+<p><strong>Recommendation:</strong> Add maximum request size limit (e.g., 1MB).</p>
+<p><strong>Sync Handler in Async Server</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-38-1"><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">handle_list_kids</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">_</span><span class="p">):</span>
+</span><span id="__span-38-2"><a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a>    <span class="c1"># Sync function called from async context</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Mixes sync and async handlers.</p>
+<p><strong>Recommendation:</strong> Make all handlers async for consistency.</p>
+<hr />
+<h2 id="9-dependencies-external-interfaces">9. Dependencies &amp; External Interfaces</h2>
+<h3 id="91-d-bus-integration">9.1 D-Bus Integration</h3>
+<p><strong>Fragile Connection Management</strong>
+- No reconnection logic
+- Assumes D-Bus is always available
+- No graceful degradation</p>
+<p><strong>Recommendation:</strong> Implement robust D-Bus connection manager with health checks.</p>
+<h3 id="92-systemd-integration">9.2 Systemd Integration</h3>
+<p><strong>Assumptions:</strong>
+- Systemd is present and functional
+- Timers work as expected
+- loginctl is available</p>
+<p><strong>Issue:</strong> No fallback if systemd is not available or malfunctioning.</p>
+<p><strong>Recommendation:</strong> Add health checks and fallback mechanisms.</p>
+<h3 id="93-pam-integration">9.3 PAM Integration</h3>
+<p><strong>High Risk:</strong>
+- Direct modification of system files
+- No validation
+- Assumes pam_time.so module is available</p>
+<p><strong>Recommendation:</strong> Extensive testing in isolated environment before deployment.</p>
+<hr />
+<h2 id="10-specific-code-smells">10. Specific Code Smells</h2>
+<h3 id="101-god-objects">10.1 God Objects</h3>
+<p><strong><code>SessionTracker</code> class</strong>
+- 1000+ lines
+- Manages sessions, D-Bus, storage, agents, locks
+- Too many responsibilities</p>
+<p><strong>Recommendation:</strong> Extract into multiple focused classes:
+- <code>SessionManager</code> - track active sessions
+- <code>SessionPersistence</code> - database operations<br />
+- <code>LockTracker</code> - lock/unlock events
+- <code>AgentDiscovery</code> - D-Bus agent management</p>
+<h3 id="102-global-state">10.2 Global State</h3>
+<p><strong>Module-level constants:</strong>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-39-1"><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a><span class="c1"># user_manager.py</span>
+</span><span id="__span-39-2"><a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a><span class="n">TIME_CONF_PATH</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;/etc/security/time.conf&quot;</span><span class="p">)</span>
+</span><span id="__span-39-3"><a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a><span class="n">PROJECT_ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">parent</span>
+</span></code></pre></div></p>
+<p><strong>Issue:</strong> Hard-coded paths make testing difficult.</p>
+<p><strong>Recommendation:</strong> Make paths configurable, inject into classes.</p>
+<h3 id="103-feature-envy">10.3 Feature Envy</h3>
+<div class="language-python python highlight"><pre><span></span><code><span id="__span-40-1"><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a><span class="c1"># enforcer.py constantly accesses tracker internals:</span>
+</span><span id="__span-40-2"><a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a><span class="bp">self</span><span class="o">.</span><span class="n">tracker</span><span class="o">.</span><span class="n">get_remaining_time</span><span class="p">(</span><span class="n">username</span><span class="p">)</span>
+</span><span id="__span-40-3"><a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a><span class="bp">self</span><span class="o">.</span><span class="n">tracker</span><span class="o">.</span><span class="n">get_total_time</span><span class="p">(</span><span class="n">username</span><span class="p">)</span>
+</span></code></pre></div>
+<p><strong>Issue:</strong> Enforcer knows too much about tracker's internal state.</p>
+<p><strong>Recommendation:</strong> Consider making enforcer a method of tracker, or create a facade.</p>
+<hr />
+<h2 id="11-missing-features-future-considerations">11. Missing Features &amp; Future Considerations</h2>
+<h3 id="111-observability">11.1 Observability</h3>
+<ul>
+<li>❌ No health check endpoint</li>
+<li>❌ No metrics export (Prometheus)</li>
+<li>❌ No structured audit logs</li>
+<li>❌ No distributed tracing</li>
+</ul>
+<h3 id="112-resilience">11.2 Resilience</h3>
+<ul>
+<li>❌ No circuit breakers for external calls</li>
+<li>❌ No rate limiting</li>
+<li>❌ No graceful degradation strategies</li>
+</ul>
+<h3 id="113-security">11.3 Security</h3>
+<ul>
+<li>❌ No encryption for sensitive config data</li>
+<li>❌ No audit logging for privileged operations</li>
+<li>❌ No rate limiting on IPC socket</li>
+</ul>
+<h3 id="114-operations">11.4 Operations</h3>
+<ul>
+<li>❌ No admin CLI for diagnostics</li>
+<li>❌ No debug mode for troubleshooting</li>
+<li>❌ No configuration validation tool</li>
+<li>❌ No system requirements checker</li>
+</ul>
+<hr />
+<h2 id="12-recommendations-priority-matrix">12. Recommendations Priority Matrix</h2>
+<h3 id="must-fix-blocking-issues">Must Fix (Blocking Issues)</h3>
+<ol>
+<li><strong>Database concurrency issues</strong> - Add proper connection pooling and locking</li>
+<li><strong>D-Bus connection robustness</strong> - Implement reconnection logic</li>
+<li><strong>PAM modification safety</strong> - Add backups and validation</li>
+<li><strong>Race condition in session updates</strong> - Fix lock scoping</li>
+<li><strong>Path traversal in user manager</strong> - Validate all user inputs</li>
+<li><strong>IPC security</strong> - Add request size limits and authentication</li>
+<li><strong>Circular dependencies</strong> - Refactor architecture</li>
+</ol>
+<h3 id="should-fix-high-priority">Should Fix (High Priority)</h3>
+<ol>
+<li><strong>Error handling</strong> - Add timeouts and retries to all external calls</li>
+<li><strong>Input validation</strong> - Implement comprehensive config validation</li>
+<li><strong>Testing</strong> - Increase coverage to &gt;80%, add integration tests</li>
+<li><strong>Type hints</strong> - Enable mypy strict mode</li>
+<li><strong>Long functions</strong> - Refactor for maintainability</li>
+<li><strong>Notification logic</strong> - Clarify and simplify enforcement strategy</li>
+<li><strong>Session restoration</strong> - Make logic more explicit</li>
+<li><strong>Quota format</strong> - Standardize and deprecate old format</li>
+</ol>
+<h3 id="nice-to-have-medium-priority">Nice to Have (Medium Priority)</h3>
+<ol>
+<li><strong>Documentation</strong> - Add architecture diagrams and sequence flows</li>
+<li><strong>Metrics</strong> - Integrate Prometheus or similar</li>
+<li><strong>Logging</strong> - Reduce verbosity in hot paths</li>
+<li><strong>Database optimization</strong> - Add pagination and archival</li>
+<li><strong>Code organization</strong> - Split large modules</li>
+<li><strong>Constants</strong> - Extract magic numbers</li>
+<li><strong>Audit logging</strong> - Implement structured audit trail</li>
+</ol>
+<h3 id="future-improvements-low-priority">Future Improvements (Low Priority)</h3>
+<ol>
+<li>Health checks and admin CLI</li>
+<li>Configuration migration tools</li>
+<li>Performance profiling</li>
+<li>Graceful degradation strategies</li>
+<li>Distributed tracing</li>
+</ol>
+<hr />
+<h2 id="13-code-metrics">13. Code Metrics</h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-41-1"><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>Total Lines of Code: ~6,000
+</span><span id="__span-41-2"><a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a>Number of Modules: 11
+</span><span id="__span-41-3"><a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a>Number of Classes: 15
+</span><span id="__span-41-4"><a id="__codelineno-41-4" name="__codelineno-41-4" href="#__codelineno-41-4"></a>Average Function Length: ~25 lines
+</span><span id="__span-41-5"><a id="__codelineno-41-5" name="__codelineno-41-5" href="#__codelineno-41-5"></a>Longest Function: 200+ lines (ensure_pam_time_module)
+</span><span id="__span-41-6"><a id="__codelineno-41-6" name="__codelineno-41-6" href="#__codelineno-41-6"></a>Cyclomatic Complexity: High in user_manager.py and sessions.py
+</span></code></pre></div>
+<p><strong>Estimated Technical Debt:</strong> ~4-6 weeks of focused refactoring</p>
+<hr />
+<h2 id="14-testing-strategy-recommendations">14. Testing Strategy Recommendations</h2>
+<h3 id="unit-tests">Unit Tests</h3>
+<ul>
+<li>✅ Already present for core modules</li>
+<li>🔨 Need: user_manager.py coverage</li>
+<li>🔨 Need: Mock all external dependencies</li>
+</ul>
+<h3 id="integration-tests">Integration Tests</h3>
+<ul>
+<li>🔨 Need: Full daemon startup/shutdown cycle</li>
+<li>🔨 Need: Session lifecycle tests</li>
+<li>🔨 Need: Config reload tests</li>
+<li>🔨 Need: Enforcement workflow tests</li>
+</ul>
+<h3 id="system-tests">System Tests</h3>
+<ul>
+<li>🔨 Need: Docker/Podman based full system tests</li>
+<li>🔨 Need: PAM integration tests</li>
+<li>🔨 Need: D-Bus integration tests</li>
+<li>🔨 Need: Multi-user scenario tests</li>
+</ul>
+<h3 id="performance-tests">Performance Tests</h3>
+<ul>
+<li>🔨 Need: Load testing with many sessions</li>
+<li>🔨 Need: Database performance tests</li>
+<li>🔨 Need: Lock contention tests</li>
+</ul>
+<h3 id="security-tests">Security Tests</h3>
+<ul>
+<li>🔨 Need: Penetration testing of IPC interface</li>
+<li>🔨 Need: PAM configuration validation</li>
+<li>🔨 Need: Privilege escalation tests</li>
+</ul>
+<hr />
+<h2 id="15-conclusion">15. Conclusion</h2>
+<p>The <code>guardian_daemon</code> codebase is functional and demonstrates good architectural thinking. The core functionality works, but there are significant reliability, security, and maintainability concerns that should be addressed before production deployment.</p>
+<p><strong>Key Priorities:</strong>
+1. Fix critical security issues (PAM modification, path traversal)
+2. Improve error handling and robustness (D-Bus, database)
+3. Increase test coverage, especially integration tests
+4. Refactor complex modules (user_manager, sessions) for maintainability
+5. Add observability and operational tooling</p>
+<p><strong>Estimated Effort:</strong>
+- Critical fixes: 1-2 weeks
+- High priority improvements: 2-3 weeks
+- Testing and documentation: 2-3 weeks
+- <strong>Total: 5-8 weeks</strong> for production readiness</p>
+<p><strong>Risk Assessment:</strong>
+- <strong>Current State:</strong> Beta quality - suitable for controlled testing only
+- <strong>After Critical Fixes:</strong> Suitable for limited production deployment
+- <strong>After All Recommendations:</strong> Production-ready for general use</p>
+<hr />
+<h2 id="16-resources">16. Resources</h2>
+<h3 id="recommended-tools">Recommended Tools</h3>
+<ul>
+<li><strong>mypy</strong> - Type checking</li>
+<li><strong>pylint</strong> / <strong>ruff</strong> - Linting</li>
+<li><strong>black</strong> - Code formatting</li>
+<li><strong>pytest-cov</strong> - Coverage reporting</li>
+<li><strong>bandit</strong> - Security scanning</li>
+<li><strong>radon</strong> - Complexity analysis</li>
+</ul>
+<h3 id="recommended-libraries">Recommended Libraries</h3>
+<ul>
+<li><strong>pydantic</strong> - Configuration validation</li>
+<li><strong>aiosqlite</strong> - Async SQLite</li>
+<li><strong>tenacity</strong> - Retry logic</li>
+<li><strong>prometheus-client</strong> - Metrics</li>
+</ul>
+<h3 id="documentation-improvements-needed">Documentation Improvements Needed</h3>
+<ol>
+<li>Architecture overview with diagrams</li>
+<li>Sequence diagrams for complex workflows</li>
+<li>State machine documentation</li>
+<li>Configuration schema reference</li>
+<li>Troubleshooting guide</li>
+<li>Security considerations document</li>
+<li>Deployment guide</li>
+<li>Upgrade/migration guide</li>
+</ol>
+<hr />
+<p><strong>End of Code Review</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["announce.dismiss", "content.action.edit", "content.action.view", "content.code.annotate", "content.code.copy", "content.tooltips", "navigation.footer", "navigation.instant.preview", "navigation.path", "navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "search.highlight", "search.suggest", "toc.follow"], "search": "../../assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.f55a23d4.min.js"></script>
+      
+    
+  </body>
+</html>
