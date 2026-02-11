@@ -283,7 +283,20 @@ class Enforcer:
                     parts = line.split()
                     if len(parts) >= 3 and parts[2] == username:
                         session_id = parts[0]
+                        # active_sessions uses Guardian-internal IDs (boot_id prefixed),
+                        # while loginctl returns the raw logind session ID.
+                        # Try direct lookup first for backward compatibility, then
+                        # resolve by matching the stored logind_session_id field.
                         session_info = self.tracker.active_sessions.get(session_id)
+                        if session_info is None:
+                            session_info = next(
+                                (
+                                    session
+                                    for session in self.tracker.active_sessions.values()
+                                    if session.get("logind_session_id") == session_id
+                                ),
+                                None,
+                            )
                         if session_info:
                             service = session_info.get("service")
                             desktop = session_info.get("desktop")
