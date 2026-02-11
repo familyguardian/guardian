@@ -154,3 +154,54 @@ async def test_handle_grace_period(enforcer, mocker):
 
     # Grace period should be active
     assert username in enforcer_instance._grace_period_users
+
+
+@pytest.mark.asyncio
+async def test_terminate_session_matches_logind_id_in_active_sessions(enforcer, mocker):
+    """Test that terminate_session resolves tracker sessions by logind session ID."""
+    enforcer_instance, mock_tracker, _ = enforcer
+
+    username = "testuser"
+
+    # SessionTracker stores boot-id-prefixed keys, while loginctl returns raw IDs.
+    mock_tracker.active_sessions = {
+        "deadbeef_c2": {
+            "logind_session_id": "c2",
+            "service": "sddm",
+            "desktop": "KDE",
+        }
+    }
+
+    # Keep lock usage compatible with async with in terminate_session
+    class _DummyLock:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    mock_tracker.session_lock = _DummyLock()
+    mock_tracker.user_manager = mocker.Mock()
+
+    proc_list = mocker.AsyncMock()
+    proc_list.communicate.return_value = (b"c2 1001 testuser\n", b"")
+    proc_list.returncode = 0
+
+    proc_terminate = mocker.AsyncMock()
+    proc_terminate.communicate.return_value = (b"", b"")
+    proc_terminate.returncode = 0
+
+    create_proc = mocker.patch(
+        "asyncio.create_subprocess_exec",
+        side_effect=[proc_list, proc_terminate],
+    )
+
+    await enforcer_instance.terminate_session(username)
+
+    # Ensure terminate-session is called for the raw logind session ID
+    assert create_proc.call_args_list[1].args[:3] == (
+        "loginctl",
+        "terminate-session",
+        "c2",
+    )
+    mock_tracker.user_manager.lock_user_account.assert_called_once_with(username)
