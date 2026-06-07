@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# Least-privilege GITHUB_TOKEN: every job only checks out and tests the repo.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
