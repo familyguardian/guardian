@@ -105,6 +105,15 @@ class Storage:
             # Create Alembic config
             alembic_cfg = Config(alembic_ini_path)
 
+            # Resolve script_location against the daemon directory rather than the
+            # process working directory. alembic.ini uses a relative
+            # "script_location = alembic", which otherwise breaks migrations
+            # whenever the daemon (or a test suite) is launched from a different
+            # CWD than guardian_daemon/.
+            alembic_cfg.set_main_option(
+                "script_location", os.path.join(daemon_dir, "alembic")
+            )
+
             # Set the DB_PATH environment variable so env.py picks it up
             # env.py uses get_url() which reads from DB_PATH environment variable
             old_db_path = os.environ.get("DB_PATH")

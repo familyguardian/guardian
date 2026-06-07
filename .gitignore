@@ -19,3 +19,5 @@ config.yaml
 docs/_build
 scripts/testenv.conf
 .coverage
+.pytest_cache
+htmlcov

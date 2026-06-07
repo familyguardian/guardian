@@ -11,4 +11,5 @@ Planned models:
 - Session (active and historical sessions)
 - UsageData (cross-device usage tracking)
 """
+
 # Database models - NOT YET IMPLEMENTED
