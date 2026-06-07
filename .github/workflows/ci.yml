@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Least-privilege GITHUB_TOKEN: every job only checks out and tests the repo.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # L0 - static quality gate (whole repo; it is ruff/black/isort clean).
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --all-groups
+      - run: uv run ruff check .
+      - run: uv run black --check .
+      - run: uv run isort --check-only .
+
+  # L1 - fast unit tests, per package.
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [guardian_daemon, guardian_agent, guardianctl, guardian_hub]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --all-groups
+      - name: Run ${{ matrix.package }} unit tests
+        run: cd ${{ matrix.package }} && uv run pytest -p no:cacheprovider
+
+  # L2 - real D-Bus contract tests (mock logind/notifications via dbus-next).
+  dbus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install D-Bus + libnotify
+        run: sudo apt-get update && sudo apt-get install -y dbus libnotify-bin
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --all-groups
+      - name: Run D-Bus contract tests
+        run: dbus-run-session -- uv run pytest tests/dbus -m dbus -p no:cacheprovider
+
+  # L3 - real PAM curfew enforcement (pam_time.so via pamtester + faketime).
+  # Needs root to edit /etc/security/time.conf and /etc/pam.d, so the venv
+  # interpreter is invoked under sudo.
+  pam:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PAM tooling + faketime
+        run: sudo apt-get update && sudo apt-get install -y pamtester libpam-modules faketime
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --all-groups
+      - name: Run PAM curfew tests (as root)
+        run: |
+          VENV_PY=$(uv run python -c 'import sys; print(sys.executable)')
+          sudo -E "$VENV_PY" -m pytest tests/pam -m pam -p no:cacheprovider

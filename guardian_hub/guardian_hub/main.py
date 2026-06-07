@@ -16,7 +16,7 @@ When implemented, guardian-hub will provide:
 def main():
     """
     Entry point for guardian-hub (NOT YET IMPLEMENTED).
-    
+
     This is a placeholder stub. When implemented, this will:
     - Start the FastAPI server
     - Initialize the database connection

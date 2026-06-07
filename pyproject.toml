@@ -32,6 +32,20 @@ dev = [
     "ruff>=0.13.1",
 ]
 
+# Dependencies for the cross-package integration test layers in the top-level
+# tests/ tree (D-Bus contract tests and PAM curfew tests). dbus-next is already a
+# runtime dependency of guardian_daemon/guardian_agent, so the real-bus mocks need
+# no extra runtime dependency. python-dbusmock is intentionally NOT used: the
+# logind/notification mocks are built directly with dbus-next so that signals
+# appear in introspection (required by manager.on_session_new) and everything runs
+# in a single interpreter. See tests/dbus/conftest.py and TESTING.md.
+test = [
+    "pytest>=8.4.2",
+    "pytest-asyncio>=0.23.5",
+    "pytest-mock>=3.12.0",
+    "pytest-cov>=4.1.0",
+]
+
 docs = [
     "mkdocs>=1.6.1",
     "mkdocs-autorefs>=1.4.3",
@@ -39,4 +53,20 @@ docs = [
     "mkdocs-material>=9.6.20",
     "mkdocs-section-index>=0.3.10",
     "mkdocstrings[python]>=0.30.1"
+]
+
+# Pytest configuration for the top-level tests/ tree. Per-package unit tests use
+# their own config (e.g. guardian_daemon/pytest.ini); this block applies when
+# pytest is invoked from the repository root.
+[tool.pytest.ini_options]
+minversion = "8.4"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+markers = [
+    "unit: fast pure-logic tests with mocked I/O (default layer)",
+    "dbus: component tests against a real D-Bus broker with dbus-next mock services (logind/notifications) - runs headless in Claude Cloud/CI",
+    "pam: tests exercising the real pam_time.so module via pamtester - runs headless in Claude Cloud/CI",
+    "systemd_units: golden-file tests for generated systemd unit/timer text",
+    "e2e: full desktop end-to-end tests - run only on a real desktop VM, never in Claude Cloud/CI",
 ]

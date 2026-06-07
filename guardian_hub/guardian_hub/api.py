@@ -10,4 +10,5 @@ Planned functionality:
 - Usage data synchronization
 - Real-time WebSocket connections
 """
+
 # FastAPI server endpoints - NOT YET IMPLEMENTED

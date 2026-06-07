@@ -1,11 +1,10 @@
 # Script to install system artifacts
 
+import datetime
 import os
 import shutil
 import subprocess
 import sys
-import datetime
-
 
 GUARDIAN_DIR = "/usr/local/guardian"
 
@@ -28,10 +27,7 @@ def ensure_tools():
     # Install 'uv' using dnf
     try:
         subprocess.run(
-            ["dnf", "install", "-y", "uv"],
-            check=True,
-            capture_output=True,
-            text=True
+            ["dnf", "install", "-y", "uv"], check=True, capture_output=True, text=True
         )
         log("Successfully installed 'uv' via dnf.")
 
@@ -40,10 +36,14 @@ def ensure_tools():
         if new_uv_path:
             log(f"'uv' is now available at {new_uv_path}")
         else:
-            log("Warning: 'uv' still not found in PATH after installation. Installation might fail.")
+            log(
+                "Warning: 'uv' still not found in PATH after installation. Installation might fail."
+            )
 
     except subprocess.CalledProcessError as e:
-        log(f"Failed to install 'uv' using dnf: {e.stderr if hasattr(e, 'stderr') else str(e)}")
+        log(
+            f"Failed to install 'uv' using dnf: {e.stderr if hasattr(e, 'stderr') else str(e)}"
+        )
         log("Trying alternative installation methods...")
 
         # Fallback to pip if dnf fails
@@ -52,7 +52,7 @@ def ensure_tools():
                 ["pip", "install", "--user", "uv"],
                 check=True,
                 capture_output=True,
-                text=True
+                text=True,
             )
             log("Successfully installed 'uv' via pip.")
 
@@ -63,7 +63,9 @@ def ensure_tools():
                 user_bin_path = os.path.expanduser("~/.local/bin/uv")
                 if os.path.exists(user_bin_path):
                     symlink_path = "/usr/local/bin/uv"
-                    log(f"Creating symlink from {user_bin_path} to {symlink_path} for system-wide access.")
+                    log(
+                        f"Creating symlink from {user_bin_path} to {symlink_path} for system-wide access."
+                    )
                     try:
                         if os.path.exists(symlink_path):
                             os.unlink(symlink_path)
@@ -71,7 +73,9 @@ def ensure_tools():
                     except OSError as e:
                         log(f"Warning: Could not create symlink: {e}")
         except subprocess.CalledProcessError as e:
-            log(f"Failed to install 'uv': {e.stderr if hasattr(e, 'stderr') else str(e)}")
+            log(
+                f"Failed to install 'uv': {e.stderr if hasattr(e, 'stderr') else str(e)}"
+            )
             log("Please install 'uv' manually and try again.")
             sys.exit(1)
 
@@ -89,7 +93,19 @@ def install_shared_python():
     """
     target_dir = os.path.join(GUARDIAN_DIR, "python")
 
-    subprocess.run(["uv", "python", "install", "--no-bin", "--install-dir", target_dir, "--managed-python"], check=True, cwd=os.path.join(os.path.dirname(__file__), "../guardian_daemon/"))
+    subprocess.run(
+        [
+            "uv",
+            "python",
+            "install",
+            "--no-bin",
+            "--install-dir",
+            target_dir,
+            "--managed-python",
+        ],
+        check=True,
+        cwd=os.path.join(os.path.dirname(__file__), "../guardian_daemon/"),
+    )
 
 
 def find_python_executable():
@@ -154,11 +170,23 @@ def install_daemon():
             source_dir,
             target_dir,
             ignore=shutil.ignore_patterns(
-                '.venv', '__pycache__', 'guardian_daemon/__pycache__', '.pytest_cache', 'guardian_daemon/.mypy_cache', '_site'
-            )
+                ".venv",
+                "__pycache__",
+                "guardian_daemon/__pycache__",
+                ".pytest_cache",
+                "guardian_daemon/.mypy_cache",
+                "_site",
+            ),
         )
         # Remove .venv, _pycache__ and .pytest_cache if they exist
-        for dir_to_remove in [".venv", "__pycache__", "guardian_daemon/__pycache__", ".pytest_cache", "guardian_daemon/.mypy_cache", "_site"]:
+        for dir_to_remove in [
+            ".venv",
+            "__pycache__",
+            "guardian_daemon/__pycache__",
+            ".pytest_cache",
+            "guardian_daemon/.mypy_cache",
+            "_site",
+        ]:
             dir_path = os.path.join(target_dir, dir_to_remove)
             if os.path.exists(dir_path):
                 shutil.rmtree(dir_path)
@@ -171,8 +199,23 @@ def install_daemon():
             for name in files:
                 os.chmod(os.path.join(root, name), 0o640)
         # Ensure venv exists and sync dependencies
-        subprocess.run(["uv", "venv", "--python", python_dir, "--directory", target_dir, venv_dir], check=True)
-        subprocess.run(["uv", "sync", "--frozen", "--python", python_dir, "--directory", target_dir], check=True, cwd=target_dir)
+        subprocess.run(
+            ["uv", "venv", "--python", python_dir, "--directory", target_dir, venv_dir],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "uv",
+                "sync",
+                "--frozen",
+                "--python",
+                python_dir,
+                "--directory",
+                target_dir,
+            ],
+            check=True,
+            cwd=target_dir,
+        )
         log(f"Installed guardian-daemon to {target_dir}")
     except PermissionError:
         log(f"Permission denied while copying to {target_dir}. Try running as root.")
@@ -205,11 +248,23 @@ def install_agent():
             source_dir,
             target_dir,
             ignore=shutil.ignore_patterns(
-                '.venv', '__pycache__', 'guardian_daemon/__pycache__', '.pytest_cache', 'guardian_daemon/.mypy_cache', '_site'
-            )
+                ".venv",
+                "__pycache__",
+                "guardian_daemon/__pycache__",
+                ".pytest_cache",
+                "guardian_daemon/.mypy_cache",
+                "_site",
+            ),
         )
         # Remove .venv, _pycache__ and .pytest_cache if they exist
-        for dir_to_remove in [".venv", "__pycache__", "guardian_daemon/__pycache__", ".pytest_cache", "guardian_daemon/.mypy_cache", "_site"]:
+        for dir_to_remove in [
+            ".venv",
+            "__pycache__",
+            "guardian_daemon/__pycache__",
+            ".pytest_cache",
+            "guardian_daemon/.mypy_cache",
+            "_site",
+        ]:
             dir_path = os.path.join(target_dir, dir_to_remove)
             if os.path.exists(dir_path):
                 shutil.rmtree(dir_path)
@@ -227,8 +282,35 @@ def install_agent():
             for name in files:
                 os.chmod(os.path.join(root, name), 0o640)
 
-        subprocess.run(["sudo", "-u", "guardian", "uv", "venv", "--python", python_dir, "--directory", target_dir, venv_dir], check=True)
-        subprocess.run(["sudo", "-u", "guardian", "uv", "sync", "--frozen", "--directory", target_dir], check=True, cwd=target_dir)
+        subprocess.run(
+            [
+                "sudo",
+                "-u",
+                "guardian",
+                "uv",
+                "venv",
+                "--python",
+                python_dir,
+                "--directory",
+                target_dir,
+                venv_dir,
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "sudo",
+                "-u",
+                "guardian",
+                "uv",
+                "sync",
+                "--frozen",
+                "--directory",
+                target_dir,
+            ],
+            check=True,
+            cwd=target_dir,
+        )
         # Ensure .venv/bin/* can be executed by guardian user AND users group
         bin_dir = os.path.join(venv_dir, "bin")
         if os.path.exists(bin_dir):
@@ -300,9 +382,7 @@ def install_systemd_units():
                 shutil.copy(src_file, dst_file)
                 log(f"Installed {filename} to {target_dir}")
             except PermissionError:
-                log(
-                    f"Permission denied while copying {filename}. Try running as root."
-                )
+                log(f"Permission denied while copying {filename}. Try running as root.")
                 sys.exit(1)
             except Exception as e:
                 log(f"Failed to install {filename}: {e}")
@@ -338,7 +418,9 @@ def setup_config_directory():
     default_config_path = os.path.join(daemon_dir, "default-config.yaml")
     # For development setup, try a fallback if the installed version doesn't exist
     if not os.path.exists(default_config_path):
-        default_config_path = os.path.join(os.path.dirname(__file__), "../guardian_daemon/default-config.yaml")
+        default_config_path = os.path.join(
+            os.path.dirname(__file__), "../guardian_daemon/default-config.yaml"
+        )
     target_config_path = os.path.join(config_dir, "config.yaml")
 
     log("Setting up persistent configuration directory...")
@@ -386,7 +468,14 @@ def install_ctl():
             shutil.rmtree(target_dir)
         shutil.copytree(source_dir, target_dir)
         # Remove .venv, _pycache__ and .pytest_cache if they exist
-        for dir_to_remove in [".venv", "__pycache__", "guardianctl/__pycache__", ".pytest_cache", "guardianctl/.mypy_cache", "_site"]:
+        for dir_to_remove in [
+            ".venv",
+            "__pycache__",
+            "guardianctl/__pycache__",
+            ".pytest_cache",
+            "guardianctl/.mypy_cache",
+            "_site",
+        ]:
             dir_path = os.path.join(target_dir, dir_to_remove)
             if os.path.exists(dir_path):
                 shutil.rmtree(dir_path)
@@ -394,9 +483,13 @@ def install_ctl():
         for root, dirs, files in os.walk(target_dir):
             shutil.chown(root, user="guardian", group="guardian")
             for name in dirs:
-                shutil.chown(os.path.join(root, name), user="guardian", group="guardian")
+                shutil.chown(
+                    os.path.join(root, name), user="guardian", group="guardian"
+                )
             for name in files:
-                shutil.chown(os.path.join(root, name), user="guardian", group="guardian")
+                shutil.chown(
+                    os.path.join(root, name), user="guardian", group="guardian"
+                )
         # Set permissions
         for root, dirs, files in os.walk(target_dir):
             for name in dirs:
@@ -404,9 +497,47 @@ def install_ctl():
             for name in files:
                 os.chmod(os.path.join(root, name), 0o640)
         # Ensure venv exists and sync dependencies
-        subprocess.run(["sudo", "-u", "guardian", "uv", "python", "--directory", target_dir, "install"], check=True, cwd=target_dir)
-        subprocess.run(["sudo", "-u", "guardian", "uv", "venv", "--directory", target_dir, venv_dir], check=True)
-        subprocess.run(["sudo", "-u", "guardian", "uv", "sync", "--frozen", "--directory", target_dir], check=True, cwd=target_dir)
+        subprocess.run(
+            [
+                "sudo",
+                "-u",
+                "guardian",
+                "uv",
+                "python",
+                "--directory",
+                target_dir,
+                "install",
+            ],
+            check=True,
+            cwd=target_dir,
+        )
+        subprocess.run(
+            [
+                "sudo",
+                "-u",
+                "guardian",
+                "uv",
+                "venv",
+                "--directory",
+                target_dir,
+                venv_dir,
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "sudo",
+                "-u",
+                "guardian",
+                "uv",
+                "sync",
+                "--frozen",
+                "--directory",
+                target_dir,
+            ],
+            check=True,
+            cwd=target_dir,
+        )
         log(f"Installed guardian ctl to {target_dir}")
     except PermissionError:
         log(f"Permission denied while copying to {target_dir}. Try running as root.")
@@ -414,6 +545,7 @@ def install_ctl():
     except Exception as e:
         log(f"Failed to install guardian ctl: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     ensure_tools()

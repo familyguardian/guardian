@@ -19,6 +19,20 @@ dev = [
     "types-psutil>=7.0.0.20250822",
     "pytest>=8.4.2",
     "pytest-asyncio>=0.23.5",
+    "pytest-mock>=3.12.0",
     "pytest-cov>=4.1.0",
     "coverage>=7.4.3",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["guardian_agent*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --tb=short"

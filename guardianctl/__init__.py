@@ -1,4 +1,0 @@
-
-"""
-Initialisiert das guardianctl Paket.
-"""

@@ -12,4 +12,5 @@ Planned functionality:
 - Heartbeat mechanism
 - Offline queue for when hub is unavailable
 """
+
 # API/WebSocket hub client - NOT YET IMPLEMENTED

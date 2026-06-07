@@ -10,4 +10,5 @@ Planned functionality:
 - User and device data persistence
 - Migration support via Alembic
 """
+
 # Database connection and logic - NOT YET IMPLEMENTED
