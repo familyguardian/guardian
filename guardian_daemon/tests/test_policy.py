@@ -107,14 +107,16 @@ def test_policy_has_quota(test_config):
 
 
 def test_policy_has_curfew(test_config):
-    """Test checking if user has curfew settings."""
+    """Test checking if a user is subject to a curfew (own or default)."""
     config, config_path = test_config
     policy = Policy(config_path)
 
     assert policy.has_curfew("test_full_settings") is True
     assert policy.has_curfew("test_weekday_curfew") is True
-    assert policy.has_curfew("test_minimal") is False
-    assert policy.has_curfew("test_quota_only") is False
+    # No explicit curfew, but the default curfew applies (and PAM enforces it),
+    # so these users are subject to a curfew too.
+    assert policy.has_curfew("test_minimal") is True
+    assert policy.has_curfew("test_quota_only") is True
     assert policy.has_curfew("nonexistent") is False
 
 
@@ -126,15 +128,16 @@ def test_policy_get_monitored_users(test_config):
     users = policy.get_monitored_users()
     assert isinstance(users, list)
 
-    # Check for users that should be monitored
+    # Check for users that should be monitored. test_quota_exempt has no quota
+    # and no explicit curfew, but inherits the default curfew -> monitored.
     assert "test_full_settings" in users
     assert "test_quota_only" in users
     assert "test_minimal" in users
     assert "test_weekday_curfew" in users
+    assert "test_quota_exempt" in users
 
-    # Check for users that should not be monitored
-    assert "test_quota_exempt" not in users
+    # Explicitly opted out -> never monitored.
     assert "test_unmonitored" not in users
 
     # Verify total number of monitored users
-    assert len(users) == 4  # Number of test users that should be monitored
+    assert len(users) == 5  # All test users except the opted-out one

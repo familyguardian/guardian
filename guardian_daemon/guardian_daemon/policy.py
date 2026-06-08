@@ -100,9 +100,14 @@ class Policy:
         return False
 
     def has_curfew(self, username: str) -> bool:
-        """Check if a user has curfew settings."""
-        user_settings = self.data.get("users", {}).get(username, {})
-        return "curfew" in user_settings
+        """Check whether a user is subject to a curfew.
+
+        Reflects the *effective* curfew -- the user's own settings or the
+        inherited defaults -- matching what ``_generate_rules`` enforces via
+        ``pam_time``. A user that relies on the default curfew is therefore
+        reported as having one (and is consequently monitored).
+        """
+        return self.get_effective_curfew(username) is not None
 
     def get_user_quota(self, username: str) -> tuple[int, int]:
         """Get daily and weekly quota for a user."""
@@ -187,7 +192,8 @@ class Policy:
             # Check if user is explicitly marked as not monitored
             if not settings.get("monitored", True):  # Default is True if not specified
                 continue
-            # Include user if they have quota or curfew settings
+            # Monitor the user if they are subject to a quota or a curfew
+            # (own or inherited from the defaults).
             if self.has_quota(username) or self.has_curfew(username):
                 result.append(username)
         return result
