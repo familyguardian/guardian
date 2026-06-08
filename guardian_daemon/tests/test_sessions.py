@@ -107,17 +107,73 @@ async def test_check_curfew(test_config, mock_dbus, user_manager):
         "23:00", "%H:%M"
     ).time()  # After allowed hours (10:00-22:00)
 
-    # Test weekday during allowed hours
+    # Test weekday during allowed hours (Monday)
     assert (
-        await session_tracker.check_curfew(test_user, weekday_time, is_weekend=False)
-        is True
+        await session_tracker.check_curfew(test_user, weekday_time, weekday=0) is True
     )
 
-    # Test weekend after allowed hours
+    # Test weekend after allowed hours (Saturday)
     assert (
-        await session_tracker.check_curfew(test_user, weekend_time, is_weekend=True)
-        is False
+        await session_tracker.check_curfew(test_user, weekend_time, weekday=5) is False
     )
+
+
+@pytest.mark.asyncio
+async def test_check_curfew_overnight(test_config, mock_dbus, user_manager):
+    """An overnight allowed window (22:00-06:00) wraps past midnight."""
+    config, config_path = test_config
+    mock_bus, mock_logind = mock_dbus
+
+    policy = Policy(config_path)
+    storage = Storage(config["db_path"])
+    session_tracker = SessionTracker(policy, storage, user_manager)
+
+    test_user = "test_full_settings"
+    # Override the weekday window with an overnight one. The effective curfew is
+    # resolved from stored settings, so write the override through storage.
+    settings = policy.storage.get_user_settings(test_user)
+    settings["curfew"]["weekdays"] = "22:00-06:00"
+    policy.storage.set_user_settings(test_user, settings)
+
+    late_evening = datetime.strptime("23:30", "%H:%M").time()  # inside window
+    early_morning = datetime.strptime("05:00", "%H:%M").time()  # inside window
+    midday = datetime.strptime("12:00", "%H:%M").time()  # outside window
+
+    # Both sides of midnight are inside the allowed window -> login allowed.
+    assert (
+        await session_tracker.check_curfew(test_user, late_evening, weekday=0) is True
+    )
+    assert (
+        await session_tracker.check_curfew(test_user, early_morning, weekday=0) is True
+    )
+    # Midday is outside the overnight window -> login denied.
+    assert await session_tracker.check_curfew(test_user, midday, weekday=0) is False
+
+
+@pytest.mark.asyncio
+async def test_check_curfew_uses_default_for_user_without_explicit_curfew(
+    test_config, mock_dbus, user_manager
+):
+    """A user with no explicit curfew inherits the default curfew.
+
+    PAM enforces the default curfew for such a user (via _generate_rules), so
+    the session-level check must agree instead of always allowing.
+    """
+    config, config_path = test_config
+    mock_bus, mock_logind = mock_dbus
+
+    policy = Policy(config_path)
+    storage = Storage(config["db_path"])
+    session_tracker = SessionTracker(policy, storage, user_manager)
+
+    # test_minimal has only a quota; its curfew comes entirely from the
+    # defaults (weekdays 08:00-20:00).
+    test_user = "test_minimal"
+    inside = datetime.strptime("14:00", "%H:%M").time()
+    after = datetime.strptime("22:00", "%H:%M").time()
+
+    assert await session_tracker.check_curfew(test_user, inside, weekday=0) is True
+    assert await session_tracker.check_curfew(test_user, after, weekday=0) is False
 
 
 @pytest.mark.asyncio

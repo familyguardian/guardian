@@ -186,11 +186,11 @@ async def test_policy_get_user_quota_test_quota_only(test_config):
 
 @pytest.mark.asyncio
 async def test_policy_get_user_curfew_weekday(test_config):
-    """Test get_user_curfew for weekday."""
+    """Test get_user_curfew for a weekday."""
     config, config_path = test_config
     policy = Policy(config_path)
 
-    curfew = policy.get_user_curfew("test_full_settings", is_weekend=False)
+    curfew = policy.get_user_curfew("test_full_settings", 0)  # Monday
 
     # Should return a dict with start and end
     assert curfew is not None
@@ -200,11 +200,11 @@ async def test_policy_get_user_curfew_weekday(test_config):
 
 @pytest.mark.asyncio
 async def test_policy_get_user_curfew_weekend(test_config):
-    """Test get_user_curfew for weekend."""
+    """Test get_user_curfew for a weekend day."""
     config, config_path = test_config
     policy = Policy(config_path)
 
-    curfew = policy.get_user_curfew("test_full_settings", is_weekend=True)
+    curfew = policy.get_user_curfew("test_full_settings", 5)  # Saturday
 
     # Should return a dict with start and end
     assert curfew is not None
@@ -219,8 +219,8 @@ async def test_policy_get_user_curfew_different_periods(test_config):
     policy = Policy(config_path)
 
     # test_full_settings has different weekday and weekend curfews
-    curfew_weekday = policy.get_user_curfew("test_full_settings", is_weekend=False)
-    curfew_weekend = policy.get_user_curfew("test_full_settings", is_weekend=True)
+    curfew_weekday = policy.get_user_curfew("test_full_settings", 0)  # Monday
+    curfew_weekend = policy.get_user_curfew("test_full_settings", 5)  # Saturday
 
     # Both should have values
     assert curfew_weekday is not None
@@ -228,6 +228,8 @@ async def test_policy_get_user_curfew_different_periods(test_config):
     # They should have start and end times
     assert "start" in curfew_weekday
     assert "start" in curfew_weekend
+    # The weekday and weekend windows differ
+    assert curfew_weekday != curfew_weekend
 
 
 @pytest.mark.asyncio

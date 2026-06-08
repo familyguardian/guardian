@@ -3,6 +3,7 @@ Policy loader for guardian-daemon.
 Loads and validates settings from a YAML configuration file.
 """
 
+import datetime
 from typing import Any, Dict, Optional
 
 from guardian_daemon.config import Config
@@ -10,6 +11,40 @@ from guardian_daemon.logging import get_logger
 from guardian_daemon.storage import Storage
 
 logger = get_logger("Policy")
+
+# Map datetime.weekday() (Monday=0 .. Sunday=6) to the curfew keys to try, in
+# priority order. "all" applies to every day and is the fallback used when no
+# day-specific window is configured.
+_CURFEW_DAY_KEYS: dict[int, tuple[str, ...]] = {
+    0: ("weekdays", "all"),
+    1: ("weekdays", "all"),
+    2: ("weekdays", "all"),
+    3: ("weekdays", "all"),
+    4: ("weekdays", "all"),
+    5: ("saturday", "all"),
+    6: ("sunday", "all"),
+}
+
+
+def parse_hhmm(value: str) -> datetime.time:
+    """Parse an ``"HH:MM"`` string into a :class:`datetime.time`."""
+    hour, minute = map(int, value.split(":"))
+    return datetime.time(hour, minute)
+
+
+def is_within_curfew_window(
+    current: datetime.time, start: datetime.time, end: datetime.time
+) -> bool:
+    """Return True if ``current`` falls inside the allowed login window.
+
+    Curfew windows describe the time during which login is *allowed*. The window
+    is half-open ``[start, end)``. A window whose start is later than its end
+    (e.g. ``22:00``-``06:00``) wraps past midnight, mirroring the
+    split-at-midnight rules emitted for ``pam_time.so``.
+    """
+    if start > end:
+        return current >= start or current < end
+    return start <= current < end
 
 
 class Policy:
@@ -94,14 +129,56 @@ class Policy:
 
         return daily, weekly
 
-    def get_user_curfew(
-        self, username: str, is_weekend: bool
-    ) -> Optional[dict[str, str]]:
-        """Get curfew settings for a user."""
-        user_settings = self.data.get("users", {}).get(username, {})
-        curfew = user_settings.get("curfew", {})
-        period = "weekend" if is_weekend else "weekday"
-        return curfew.get(period)
+    def get_effective_curfew(self, username: str) -> Optional[dict]:
+        """Return the effective curfew for a user as a per-day mapping.
+
+        Merges the user's own curfew over the configured defaults -- the same
+        resolution :meth:`UserManager._generate_rules` uses to emit ``pam_time``
+        rules -- so the Python-level curfew checks agree with what PAM actually
+        enforces. Returns ``None`` when neither the user nor the defaults define
+        a curfew.
+        """
+        user_policy = self.get_user_policy(username)
+        if not user_policy:
+            return None
+        curfew = user_policy.get("curfew")
+        if curfew is None:
+            curfew = self.get_default("curfew")
+        return curfew if isinstance(curfew, dict) and curfew else None
+
+    def get_user_curfew(self, username: str, weekday: int) -> Optional[dict[str, str]]:
+        """Return the allowed-login window for ``username`` on a given weekday.
+
+        The window reflects the *effective* curfew (the user's own settings
+        merged over the configured defaults), i.e. the same windows
+        :meth:`UserManager._generate_rules` emits, so a user that relies on the
+        default curfew is reported as restricted here too.
+
+        Args:
+            username: The user to look up.
+            weekday: Day of week as :meth:`datetime.date.weekday`
+                (Monday=0 .. Sunday=6).
+
+        Returns:
+            ``{"start": "HH:MM", "end": "HH:MM"}`` describing the window during
+            which login is allowed, or ``None`` if no curfew applies that day.
+            Curfew is stored as per-day ``"HH:MM-HH:MM"`` ranges keyed by
+            ``weekdays``/``saturday``/``sunday``/``all``.
+        """
+        curfew = self.get_effective_curfew(username)
+        if not curfew:
+            return None
+
+        window = None
+        for key in _CURFEW_DAY_KEYS.get(weekday, ("all",)):
+            if curfew.get(key):
+                window = curfew[key]
+                break
+
+        if not isinstance(window, str) or "-" not in window:
+            return None
+        start, end = window.split("-", 1)
+        return {"start": start.strip(), "end": end.strip()}
 
     def get_monitored_users(self) -> list[str]:
         """Get list of all monitored users (excluding those with monitored: False)."""
