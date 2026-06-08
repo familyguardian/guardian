@@ -79,9 +79,11 @@ is actually allowed inside the curfew window and denied outside it. The test PAM
 service layers `pam_time.so` over a `pam_permit.so` fallback, mirroring how
 pam_time sits on a real account stack (a no-match must not deny).
 
-`test_curfew_enforcement.py::test_overnight_curfew_behaviour` characterises a
-latent bug: overnight windows like `22:00-06:00` are emitted as the start>end
-range `Wk2200-0600`, which pam_time does not treat as wrapping past midnight.
+`test_curfew_enforcement.py::test_overnight_curfew_enforced` covers overnight
+windows like `22:00-06:00`. These used to be emitted as the start>end range
+`Wk2200-0600`, which pam_time does not treat as wrapping past midnight; the test
+proves the (now fixed) splitting into `Wk2200-2400 | Wk0000-0600` is enforced on
+both sides of midnight.
 
 ## Not yet implemented / external
 
@@ -98,6 +100,11 @@ range `Wk2200-0600`, which pam_time does not treat as wrapping past midnight.
 
 ## Reliability fixes surfaced while building this
 
+- `user_manager._generate_rules()` emitted overnight curfews (e.g. `22:00-06:00`)
+  as the start>end range `Wk2200-0600`, which `pam_time.so` does not wrap past
+  midnight, so the curfew silently failed to restrict logins. It now splits such
+  windows into `Wk2200-2400 | Wk0000-0600` (matching `_is_user_in_curfew`'s
+  existing overnight handling); the L3 PAM test enforces both halves for real.
 - `storage.py` resolved the Alembic `script_location` relative to the process
   CWD, so DB migrations failed whenever the daemon/tests were launched from any
   directory other than `guardian_daemon/`. Now resolved against the daemon dir.

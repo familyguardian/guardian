@@ -60,17 +60,19 @@ def test_multiple_kids_each_get_a_rule(make_user_manager):
     assert "Wk0730-1930" in _kid_rule(rules, "kid2").split(";")[-1].split("|")
 
 
-def test_overnight_curfew_generates_inverted_range(make_user_manager):
-    """Documents a latent bug: an overnight window (22:00-06:00) is emitted as
-    'Wk2200-0600', a start>end range that pam_time does not interpret as
-    wrapping past midnight. _generate_rules() (unlike _is_user_in_curfew) has no
-    overnight handling. The PAM-level consequence is asserted in
-    test_curfew_enforcement.py::test_overnight_curfew_behaviour.
+def test_overnight_curfew_splits_across_midnight(make_user_manager):
+    """An overnight window (22:00-06:00) wraps past midnight, which pam_time does
+    not handle for a single start>end range. _generate_rules() therefore splits
+    it into two ranges meeting at midnight (Wk2200-2400 | Wk0000-0600) so
+    pam_time enforces both halves. The PAM-level behaviour is asserted in
+    test_curfew_enforcement.py::test_overnight_curfew_enforced.
     """
     um = make_user_manager(
         users={"kid1": {"curfew": {"weekdays": "22:00-06:00"}}},
         defaults=NO_DEFAULT_CURFEW,
     )
-    assert "Wk2200-0600" in _kid_rule(um._generate_rules(), "kid1").split(";")[
-        -1
-    ].split("|")
+    parts = _kid_rule(um._generate_rules(), "kid1").split(";")[-1].split("|")
+    assert "Wk2200-2400" in parts
+    assert "Wk0000-0600" in parts
+    # The naive (non-wrapping) start>end range must not be emitted.
+    assert "Wk2200-0600" not in parts
