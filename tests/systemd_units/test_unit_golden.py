@@ -12,8 +12,13 @@ from unittest.mock import patch
 
 import pytest
 
-from guardian_daemon.systemd_manager import (SystemdManager, _render_curfew_service, _render_curfew_timer,
-                                             _render_daily_reset_service, _render_daily_reset_timer)
+from guardian_daemon.systemd_manager import (
+    SystemdManager,
+    _render_curfew_service,
+    _render_curfew_timer,
+    _render_daily_reset_service,
+    _render_daily_reset_timer,
+)
 
 
 def _systemd_analyze_available() -> bool:
