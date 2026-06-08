@@ -12,13 +12,8 @@ from unittest.mock import patch
 
 import pytest
 
-from guardian_daemon.systemd_manager import (
-    SystemdManager,
-    _render_curfew_service,
-    _render_curfew_timer,
-    _render_daily_reset_service,
-    _render_daily_reset_timer,
-)
+from guardian_daemon.systemd_manager import (SystemdManager, _render_curfew_service, _render_curfew_timer,
+                                             _render_daily_reset_service, _render_daily_reset_timer)
 
 
 def _systemd_analyze_available() -> bool:
@@ -158,9 +153,7 @@ def test_render_functions_produce_valid_ini_sections():
 
 def test_create_daily_reset_timer_writes_expected_content(tmp_path):
     mgr = SystemdManager()
-    with patch(
-        "guardian_daemon.systemd_manager.SYSTEMD_PATH", tmp_path
-    ):
+    with patch("guardian_daemon.systemd_manager.SYSTEMD_PATH", tmp_path):
         mgr.create_daily_reset_timer("03:00")
 
     service_text = (tmp_path / "guardian-daily-reset.service").read_text()
@@ -172,9 +165,7 @@ def test_create_daily_reset_timer_writes_expected_content(tmp_path):
 
 def test_create_curfew_timer_writes_expected_content(tmp_path):
     mgr = SystemdManager()
-    with patch(
-        "guardian_daemon.systemd_manager.SYSTEMD_PATH", tmp_path
-    ):
+    with patch("guardian_daemon.systemd_manager.SYSTEMD_PATH", tmp_path):
         mgr.create_curfew_timer("22:00", "06:00")
 
     service_text = (tmp_path / "guardian-curfew.service").read_text()
@@ -230,20 +221,23 @@ def _verify_unit(tmp_path: Path, filename: str, content: str) -> None:
         for line in result.stderr.splitlines()
         if line.strip() and not any(pat in line for pat in ignorable)
     ]
-    assert not real_errors, (
-        f"systemd-analyze verify found errors in {filename}:\n"
-        + "\n".join(real_errors)
-    )
+    assert (
+        not real_errors
+    ), f"systemd-analyze verify found errors in {filename}:\n" + "\n".join(real_errors)
 
 
 @requires_systemd_analyze
 def test_daily_reset_service_passes_systemd_analyze(tmp_path):
-    _verify_unit(tmp_path, "guardian-daily-reset.service", _render_daily_reset_service())
+    _verify_unit(
+        tmp_path, "guardian-daily-reset.service", _render_daily_reset_service()
+    )
 
 
 @requires_systemd_analyze
 def test_daily_reset_timer_passes_systemd_analyze(tmp_path):
-    _verify_unit(tmp_path, "guardian-daily-reset.timer", _render_daily_reset_timer("03:00"))
+    _verify_unit(
+        tmp_path, "guardian-daily-reset.timer", _render_daily_reset_timer("03:00")
+    )
 
 
 @requires_systemd_analyze
@@ -253,4 +247,6 @@ def test_curfew_service_passes_systemd_analyze(tmp_path):
 
 @requires_systemd_analyze
 def test_curfew_timer_passes_systemd_analyze(tmp_path):
-    _verify_unit(tmp_path, "guardian-curfew.timer", _render_curfew_timer("22:00", "06:00"))
+    _verify_unit(
+        tmp_path, "guardian-curfew.timer", _render_curfew_timer("22:00", "06:00")
+    )
