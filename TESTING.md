@@ -124,7 +124,9 @@ both sides of midnight.
   short-circuited on the explicit-only `has_curfew()`). Both now resolve the
   *effective* curfew through a single shared `policy.get_effective_curfew()` --
   the very helper `_generate_rules()` uses -- so the Python checks and the PAM
-  rules can no longer drift.
+  rules can no longer drift. `has_curfew()` (and therefore `get_monitored_users()`)
+  now reports the effective curfew too, so a user who relies on the default
+  curfew is correctly treated as having one and is monitored.
 - `storage.py` resolved the Alembic `script_location` relative to the process
   CWD, so DB migrations failed whenever the daemon/tests were launched from any
   directory other than `guardian_daemon/`. Now resolved against the daemon dir.

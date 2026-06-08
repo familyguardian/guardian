@@ -91,13 +91,14 @@ async def test_policy_has_curfew_true(test_config):
 
 
 @pytest.mark.asyncio
-async def test_policy_has_curfew_false(test_config):
-    """Test has_curfew returns False when user has no curfew."""
+async def test_policy_has_curfew_inherits_default(test_config):
+    """has_curfew is True when a user inherits the default curfew."""
     config, config_path = test_config
     policy = Policy(config_path)
 
-    # test_quota_only has no curfew settings
-    assert policy.has_curfew("test_quota_only") is False
+    # test_quota_only has no explicit curfew but inherits the default one,
+    # which PAM enforces -- so it counts as having a curfew.
+    assert policy.has_curfew("test_quota_only") is True
 
 
 @pytest.mark.asyncio
