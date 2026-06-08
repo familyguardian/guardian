@@ -116,6 +116,15 @@ both sides of midnight.
   All three now read the canonical schema with overnight-aware windows, and
   `_is_user_in_curfew` correctly reports the blocked period (the complement of
   the allowed login window) instead of being silently inverted.
+- The same curfew checks also disagreed with PAM on *which users* have a curfew:
+  `get_user_curfew()` read only the explicit per-user config, while
+  `_generate_rules()` falls back to (and per-day merges) the **default** curfew.
+  A user relying on the default curfew was therefore restricted by `pam_time` but
+  reported as "no curfew" by `check_curfew()`/`_is_user_in_curfew()` (which also
+  short-circuited on the explicit-only `has_curfew()`). Both now resolve the
+  *effective* curfew through a single shared `policy.get_effective_curfew()` --
+  the very helper `_generate_rules()` uses -- so the Python checks and the PAM
+  rules can no longer drift.
 - `storage.py` resolved the Alembic `script_location` relative to the process
   CWD, so DB migrations failed whenever the daemon/tests were launched from any
   directory other than `guardian_daemon/`. Now resolved against the daemon dir.

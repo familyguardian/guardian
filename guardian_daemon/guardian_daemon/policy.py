@@ -129,8 +129,30 @@ class Policy:
 
         return daily, weekly
 
+    def get_effective_curfew(self, username: str) -> Optional[dict]:
+        """Return the effective curfew for a user as a per-day mapping.
+
+        Merges the user's own curfew over the configured defaults -- the same
+        resolution :meth:`UserManager._generate_rules` uses to emit ``pam_time``
+        rules -- so the Python-level curfew checks agree with what PAM actually
+        enforces. Returns ``None`` when neither the user nor the defaults define
+        a curfew.
+        """
+        user_policy = self.get_user_policy(username)
+        if not user_policy:
+            return None
+        curfew = user_policy.get("curfew")
+        if curfew is None:
+            curfew = self.get_default("curfew")
+        return curfew if isinstance(curfew, dict) and curfew else None
+
     def get_user_curfew(self, username: str, weekday: int) -> Optional[dict[str, str]]:
         """Return the allowed-login window for ``username`` on a given weekday.
+
+        The window reflects the *effective* curfew (the user's own settings
+        merged over the configured defaults), i.e. the same windows
+        :meth:`UserManager._generate_rules` emits, so a user that relies on the
+        default curfew is reported as restricted here too.
 
         Args:
             username: The user to look up.
@@ -139,13 +161,12 @@ class Policy:
 
         Returns:
             ``{"start": "HH:MM", "end": "HH:MM"}`` describing the window during
-            which login is allowed, or ``None`` if the user has no curfew for
-            that day. Curfew is stored as per-day ``"HH:MM-HH:MM"`` ranges keyed
-            by ``weekdays``/``saturday``/``sunday``/``all``.
+            which login is allowed, or ``None`` if no curfew applies that day.
+            Curfew is stored as per-day ``"HH:MM-HH:MM"`` ranges keyed by
+            ``weekdays``/``saturday``/``sunday``/``all``.
         """
-        user_settings = self.data.get("users", {}).get(username, {})
-        curfew = user_settings.get("curfew", {})
-        if not isinstance(curfew, dict):
+        curfew = self.get_effective_curfew(username)
+        if not curfew:
             return None
 
         window = None

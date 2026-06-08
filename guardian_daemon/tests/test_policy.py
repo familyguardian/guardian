@@ -65,17 +65,32 @@ def test_policy_get_user_curfew(test_config):
     assert sunday["start"] == "10:00"
     assert sunday["end"] == "22:00"
 
-    # Test user with only weekday curfew
+    # User overriding only weekdays -> Sat/Sun windows are inherited from the
+    # defaults (mirroring the rules _generate_rules emits via pam_time).
     weekday = policy.get_user_curfew("test_weekday_curfew", 0)
-    assert weekday["start"] == "09:00"
-    assert weekday["end"] == "21:00"
-    # No saturday/sunday window configured -> None on the weekend
-    assert policy.get_user_curfew("test_weekday_curfew", 5) is None
-    assert policy.get_user_curfew("test_weekday_curfew", 6) is None
+    assert weekday == {"start": "09:00", "end": "21:00"}
+    assert policy.get_user_curfew("test_weekday_curfew", 5) == {
+        "start": "10:00",
+        "end": "22:00",
+    }
+    assert policy.get_user_curfew("test_weekday_curfew", 6) == {
+        "start": "10:00",
+        "end": "20:00",
+    }
 
-    # Test user without curfew settings
-    assert policy.get_user_curfew("test_minimal", 0) is None
-    assert policy.get_user_curfew("test_minimal", 5) is None
+    # User with no explicit curfew still inherits the default curfew (PAM
+    # enforces it for them too), so the check must report it.
+    assert policy.get_user_curfew("test_minimal", 0) == {
+        "start": "08:00",
+        "end": "20:00",
+    }
+    assert policy.get_user_curfew("test_minimal", 5) == {
+        "start": "10:00",
+        "end": "22:00",
+    }
+
+    # Unknown user -> no curfew at all.
+    assert policy.get_user_curfew("nonexistent", 0) is None
 
 
 def test_policy_has_quota(test_config):

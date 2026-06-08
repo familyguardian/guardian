@@ -797,8 +797,7 @@ class UserManager:
         }
 
         for username in managed_users:
-            user_policy = self.policy.get_user_policy(username)
-            curfew = user_policy.get("curfew", self.policy.get_default("curfew"))
+            curfew = self.policy.get_effective_curfew(username)
 
             if curfew:
                 # Create a combined day specification for all allowed times.
@@ -1521,13 +1520,10 @@ class UserManager:
         import datetime
 
         try:
-            # Check if user has curfew configured
-            if not self.policy.has_curfew(username):
-                return False
-
             now = datetime.datetime.now()
 
-            # Get the allowed-login window for the current day
+            # Get the allowed-login window for the current day (effective curfew
+            # = the user's own settings merged over the defaults).
             curfew = self.policy.get_user_curfew(username, now.weekday())
             if not curfew:
                 return False

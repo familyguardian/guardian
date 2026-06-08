@@ -783,14 +783,11 @@ class SessionTracker:
         Returns:
             bool: True if allowed, False if curfew is in effect
         """
-        # If no curfew settings, always allow
-        if not self.policy.has_curfew(username):
-            return True
-
-        # Get the allowed-login window for the given day
+        # Get the allowed-login window for the given day (effective curfew =
+        # the user's own settings merged over the defaults).
         curfew = self.policy.get_user_curfew(username, weekday)
         if not curfew:
-            return True  # No curfew for this day type means allowed
+            return True  # No curfew applies on this day -> always allowed
 
         start_time = parse_hhmm(curfew["start"])
         end_time = parse_hhmm(curfew["end"])
