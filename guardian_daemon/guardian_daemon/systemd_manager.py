@@ -21,6 +21,57 @@ def _is_valid_time_format(time_str):
     return re.match(r"^(2[0-3]|[01]?[0-9]):([0-5]?[0-9])$", time_str)
 
 
+def _render_daily_reset_service() -> str:
+    return """
+[Unit]
+Description=Guardian daily quota reset
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/guardianctl reset-quota
+"""
+
+
+def _render_daily_reset_timer(reset_time: str) -> str:
+    return f"""
+[Unit]
+Description=Guardian daily quota reset timer
+
+[Timer]
+OnCalendar=*-*-* {reset_time}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+
+
+def _render_curfew_service() -> str:
+    return """
+[Unit]
+Description=Guardian curfew enforcement
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/guardianctl enforce-curfew
+"""
+
+
+def _render_curfew_timer(start_time: str, end_time: str) -> str:
+    return f"""
+[Unit]
+Description=Guardian curfew enforcement timer
+
+[Timer]
+OnCalendar=*-*-* {start_time}:00
+OnCalendar=*-*-* {end_time}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+
+
 class SystemdManager:
     """
     Manages systemd timers and units for daily reset and curfew enforcement.
@@ -44,25 +95,8 @@ class SystemdManager:
         logger.debug(
             f"Preparing to create daily reset timer: {timer_name} at {reset_time}"
         )
-        service_unit = """
-[Unit]
-Description=Guardian daily quota reset
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/guardianctl reset-quota
-"""
-        timer_unit = f"""
-[Unit]
-Description=Guardian daily quota reset timer
-
-[Timer]
-OnCalendar=*-*-* {reset_time}:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-"""
+        service_unit = _render_daily_reset_service()
+        timer_unit = _render_daily_reset_timer(reset_time)
         try:
             # Write service unit
             with open(SYSTEMD_PATH / f"{timer_name}.service", "w") as f:
@@ -94,26 +128,8 @@ WantedBy=timers.target
         logger.debug(
             f"Preparing to create curfew timer: {timer_name} from {start_time} to {end_time}"
         )
-        service_unit = """
-[Unit]
-Description=Guardian curfew enforcement
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/guardianctl enforce-curfew
-"""
-        timer_unit = f"""
-[Unit]
-Description=Guardian curfew enforcement timer
-
-[Timer]
-OnCalendar=*-*-* {start_time}:00
-OnCalendar=*-*-* {end_time}:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-"""
+        service_unit = _render_curfew_service()
+        timer_unit = _render_curfew_timer(start_time, end_time)
         try:
             with open(SYSTEMD_PATH / f"{timer_name}.service", "w") as f:
                 f.write(service_unit)
