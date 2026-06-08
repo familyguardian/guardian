@@ -58,6 +58,9 @@ docs = [
 # Pytest configuration for the top-level tests/ tree. Per-package unit tests use
 # their own config (e.g. guardian_daemon/pytest.ini); this block applies when
 # pytest is invoked from the repository root.
+[tool.isort]
+profile = "black"
+
 [tool.pytest.ini_options]
 minversion = "8.4"
 asyncio_mode = "auto"

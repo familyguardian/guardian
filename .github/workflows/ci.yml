@@ -59,6 +59,19 @@ jobs:
       - name: Run D-Bus contract tests
         run: dbus-run-session -- uv run pytest tests/dbus -m dbus -p no:cacheprovider
 
+  # L3b - systemd unit golden-text tests (no running systemd required).
+  systemd_units:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --all-groups
+      - name: Run systemd unit golden tests
+        run: uv run pytest tests/systemd_units -m systemd_units -p no:cacheprovider
+
   # L3 - real PAM curfew enforcement (pam_time.so via pamtester + faketime).
   # Needs root to edit /etc/security/time.conf and /etc/pam.d, so the venv
   # interpreter is invoked under sudo.
