@@ -24,8 +24,9 @@ def test_config():
                     "monthly": 2400,  # 40 hours
                 },
                 "curfew": {
-                    "weekday": {"start": "08:00", "end": "20:00"},
-                    "weekend": {"start": "10:00", "end": "22:00"},
+                    "weekdays": "08:00-20:00",
+                    "saturday": "10:00-22:00",
+                    "sunday": "10:00-22:00",
                 },
                 "bonus_pool": 60,  # 1 hour bonus time
                 "grace_period": 15,  # 15 minutes grace period
@@ -33,9 +34,7 @@ def test_config():
             "test_quota_only": {
                 "quota": {"daily": 60, "weekly": 300}  # 1 hour  # 5 hours
             },
-            "test_weekday_curfew": {
-                "curfew": {"weekday": {"start": "09:00", "end": "21:00"}}
-            },
+            "test_weekday_curfew": {"curfew": {"weekdays": "09:00-21:00"}},
             "test_minimal": {"quota": {"daily": 30}},  # Only daily quota, no weekly
             "test_quota_exempt": {"quota_exempt": True},
             "test_unmonitored": {"monitored": False},

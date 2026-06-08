@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from guardian_daemon.logging import get_logger
-from guardian_daemon.policy import Policy
+from guardian_daemon.policy import Policy, is_within_curfew_window, parse_hhmm
 
 if TYPE_CHECKING:
     from guardian_daemon.sessions import SessionTracker
@@ -1507,13 +1507,16 @@ class UserManager:
 
     def _is_user_in_curfew(self, username: str) -> bool:
         """
-        Check if a user is currently within their curfew window.
+        Check whether a user is currently in their curfew (blocked) period.
+
+        Curfew windows define the times during which login is *allowed*, so a
+        user is "in curfew" when the current time falls *outside* that window.
 
         Args:
             username: The username to check
 
         Returns:
-            bool: True if currently in curfew, False otherwise
+            bool: True if currently blocked by curfew, False otherwise
         """
         import datetime
 
@@ -1523,32 +1526,18 @@ class UserManager:
                 return False
 
             now = datetime.datetime.now()
-            is_weekend = now.weekday() >= 5  # Saturday=5, Sunday=6
 
-            # Get curfew for current day type
-            curfew = self.policy.get_user_curfew(username, is_weekend)
+            # Get the allowed-login window for the current day
+            curfew = self.policy.get_user_curfew(username, now.weekday())
             if not curfew:
                 return False
 
-            start_time = curfew.get("start")
-            end_time = curfew.get("end")
+            start = parse_hhmm(curfew["start"])
+            end = parse_hhmm(curfew["end"])
 
-            if not start_time or not end_time:
-                return False
-
-            # Parse times
-            start_hour, start_min = map(int, start_time.split(":"))
-            end_hour, end_min = map(int, end_time.split(":"))
-
-            current_time = now.time()
-            start = datetime.time(start_hour, start_min)
-            end = datetime.time(end_hour, end_min)
-
-            # Handle overnight curfews (e.g., 22:00-06:00)
-            if start > end:
-                return current_time >= start or current_time < end
-            else:
-                return start <= current_time < end
+            # "In curfew" is the complement of the allowed login window
+            # (overnight windows wrap past midnight).
+            return not is_within_curfew_window(now.time(), start, end)
 
         except Exception as e:
             logger.error(f"Error checking curfew for {username}: {e}")

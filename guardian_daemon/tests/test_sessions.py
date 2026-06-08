@@ -107,17 +107,44 @@ async def test_check_curfew(test_config, mock_dbus, user_manager):
         "23:00", "%H:%M"
     ).time()  # After allowed hours (10:00-22:00)
 
-    # Test weekday during allowed hours
+    # Test weekday during allowed hours (Monday)
     assert (
-        await session_tracker.check_curfew(test_user, weekday_time, is_weekend=False)
-        is True
+        await session_tracker.check_curfew(test_user, weekday_time, weekday=0) is True
     )
 
-    # Test weekend after allowed hours
+    # Test weekend after allowed hours (Saturday)
     assert (
-        await session_tracker.check_curfew(test_user, weekend_time, is_weekend=True)
-        is False
+        await session_tracker.check_curfew(test_user, weekend_time, weekday=5) is False
     )
+
+
+@pytest.mark.asyncio
+async def test_check_curfew_overnight(test_config, mock_dbus, user_manager):
+    """An overnight allowed window (22:00-06:00) wraps past midnight."""
+    config, config_path = test_config
+    mock_bus, mock_logind = mock_dbus
+
+    policy = Policy(config_path)
+    storage = Storage(config["db_path"])
+    session_tracker = SessionTracker(policy, storage, user_manager)
+
+    test_user = "test_full_settings"
+    # Override the weekday window with an overnight one.
+    policy.data["users"][test_user]["curfew"]["weekdays"] = "22:00-06:00"
+
+    late_evening = datetime.strptime("23:30", "%H:%M").time()  # inside window
+    early_morning = datetime.strptime("05:00", "%H:%M").time()  # inside window
+    midday = datetime.strptime("12:00", "%H:%M").time()  # outside window
+
+    # Both sides of midnight are inside the allowed window -> login allowed.
+    assert (
+        await session_tracker.check_curfew(test_user, late_evening, weekday=0) is True
+    )
+    assert (
+        await session_tracker.check_curfew(test_user, early_morning, weekday=0) is True
+    )
+    # Midday is outside the overnight window -> login denied.
+    assert await session_tracker.check_curfew(test_user, midday, weekday=0) is False
 
 
 @pytest.mark.asyncio

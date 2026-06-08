@@ -16,7 +16,7 @@ from dbus_next.constants import BusType
 from dbus_next.service import ServiceInterface, method
 
 from guardian_daemon.logging import get_logger
-from guardian_daemon.policy import Policy
+from guardian_daemon.policy import Policy, is_within_curfew_window, parse_hhmm
 from guardian_daemon.storage import Storage
 from guardian_daemon.user_manager import UserManager
 
@@ -772,13 +772,13 @@ class SessionTracker:
 
         return True
 
-    async def check_curfew(self, username: str, current_time, is_weekend: bool) -> bool:
+    async def check_curfew(self, username: str, current_time, weekday: int) -> bool:
         """Check if a user is allowed to log in at the current time based on curfew settings.
 
         Args:
             username (str): Username
             current_time: Current time to check (datetime.time)
-            is_weekend (bool): Whether it's a weekend day
+            weekday (int): Day of week as datetime.weekday() (Monday=0 .. Sunday=6)
 
         Returns:
             bool: True if allowed, False if curfew is in effect
@@ -787,21 +787,21 @@ class SessionTracker:
         if not self.policy.has_curfew(username):
             return True
 
-        # Get curfew settings for the given day type
-        curfew = self.policy.get_user_curfew(username, is_weekend)
+        # Get the allowed-login window for the given day
+        curfew = self.policy.get_user_curfew(username, weekday)
         if not curfew:
             return True  # No curfew for this day type means allowed
 
-        # Parse curfew times
-        start_time = datetime.datetime.strptime(curfew["start"], "%H:%M").time()
-        end_time = datetime.datetime.strptime(curfew["end"], "%H:%M").time()
+        start_time = parse_hhmm(curfew["start"])
+        end_time = parse_hhmm(curfew["end"])
 
-        # Check if current time is within allowed hours
-        if start_time <= current_time <= end_time:
+        # The window is the allowed login time; overnight windows wrap midnight.
+        if is_within_curfew_window(current_time, start_time, end_time):
             return True
 
         logger.info(
-            f"Curfew in effect for {username}: current {current_time}, allowed {start_time}-{end_time}"
+            f"Curfew in effect for {username}: current {current_time}, "
+            f"allowed {curfew['start']}-{curfew['end']}"
         )
         return False
 

@@ -105,6 +105,17 @@ both sides of midnight.
   midnight, so the curfew silently failed to restrict logins. It now splits such
   windows into `Wk2200-2400 | Wk0000-0600` (matching `_is_user_in_curfew`'s
   existing overnight handling); the L3 PAM test enforces both halves for real.
+- `policy.get_user_curfew()` (and its consumers `sessions.check_curfew()` and
+  `user_manager._is_user_in_curfew()`) read a *different* curfew schema
+  (`weekday`/`weekend` -> `{start, end}`) than the rest of the system produces -
+  the config, IPC write-validation, CLI and PAM enforcement all use
+  `weekdays`/`saturday`/`sunday` -> `"HH:MM-HH:MM"`. On any real config the
+  reader therefore returned `None`, making both consumers inert (always-allow /
+  always-false), and the daemon's `in_curfew=` log was meaningless. The unit
+  tests only stayed green because the per-user fixtures used the phantom schema.
+  All three now read the canonical schema with overnight-aware windows, and
+  `_is_user_in_curfew` correctly reports the blocked period (the complement of
+  the allowed login window) instead of being silently inverted.
 - `storage.py` resolved the Alembic `script_location` relative to the process
   CWD, so DB migrations failed whenever the daemon/tests were launched from any
   directory other than `guardian_daemon/`. Now resolved against the daemon dir.

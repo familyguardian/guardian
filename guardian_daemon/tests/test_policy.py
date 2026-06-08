@@ -52,24 +52,30 @@ def test_policy_get_user_curfew(test_config):
     config, config_path = test_config
     policy = Policy(config_path)
 
-    # Test user with full settings
-    weekday = policy.get_user_curfew("test_full_settings", is_weekend=False)
+    # Test user with full settings (Monday=0, Saturday=5, Sunday=6)
+    weekday = policy.get_user_curfew("test_full_settings", 0)
     assert weekday["start"] == "08:00"
     assert weekday["end"] == "20:00"
 
-    weekend = policy.get_user_curfew("test_full_settings", is_weekend=True)
-    assert weekend["start"] == "10:00"
-    assert weekend["end"] == "22:00"
+    saturday = policy.get_user_curfew("test_full_settings", 5)
+    assert saturday["start"] == "10:00"
+    assert saturday["end"] == "22:00"
+
+    sunday = policy.get_user_curfew("test_full_settings", 6)
+    assert sunday["start"] == "10:00"
+    assert sunday["end"] == "22:00"
 
     # Test user with only weekday curfew
-    weekday = policy.get_user_curfew("test_weekday_curfew", is_weekend=False)
+    weekday = policy.get_user_curfew("test_weekday_curfew", 0)
     assert weekday["start"] == "09:00"
     assert weekday["end"] == "21:00"
-    assert policy.get_user_curfew("test_weekday_curfew", is_weekend=True) is None
+    # No saturday/sunday window configured -> None on the weekend
+    assert policy.get_user_curfew("test_weekday_curfew", 5) is None
+    assert policy.get_user_curfew("test_weekday_curfew", 6) is None
 
     # Test user without curfew settings
-    assert policy.get_user_curfew("test_minimal", is_weekend=False) is None
-    assert policy.get_user_curfew("test_minimal", is_weekend=True) is None
+    assert policy.get_user_curfew("test_minimal", 0) is None
+    assert policy.get_user_curfew("test_minimal", 5) is None
 
 
 def test_policy_has_quota(test_config):
