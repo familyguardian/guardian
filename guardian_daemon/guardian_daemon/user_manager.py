@@ -811,7 +811,15 @@ class UserManager:
                         start, end = time_range.split("-")
                         start = start.replace(":", "")
                         end = end.replace(":", "")
-                        time_specs.append(f"{day_code}{start}-{end}")
+                        if int(start) < int(end):
+                            time_specs.append(f"{day_code}{start}-{end}")
+                        else:
+                            # Overnight window (e.g. 22:00-06:00): pam_time does
+                            # not treat a start>end range as wrapping past
+                            # midnight, so split it into two ranges that meet at
+                            # midnight (matching _is_user_in_curfew's handling).
+                            time_specs.append(f"{day_code}{start}-2400")
+                            time_specs.append(f"{day_code}0000-{end}")
 
                 if time_specs:
                     # Apply the combined rule to all services and ttys for the user.

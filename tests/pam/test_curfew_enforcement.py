@@ -74,24 +74,32 @@ def test_non_kid_user_always_allowed(make_user_manager, pam_curfew):
     ), f"expected non-managed user always allowed, got: {proc.stderr or proc.stdout}"
 
 
-def test_overnight_curfew_behaviour(make_user_manager, pam_curfew):
-    """Characterisation test for the overnight-window bug.
+def test_overnight_curfew_enforced(make_user_manager, pam_curfew):
+    """Overnight window (allow 22:00-06:00, deny during the day) is enforced
+    across midnight.
 
-    Intended policy: allow 22:00-06:00, deny during the day. The generated
-    'Wk2200-0600' is a start>end range. We assert what pam_time ACTUALLY does at
-    14:00 (clearly outside the intended overnight window) so the behaviour is
-    pinned; when _generate_rules() is fixed to split overnight windows, update
-    this expectation.
+    _generate_rules() splits the wrapping window into Wk2200-2400 | Wk0000-0600
+    so pam_time evaluates both the pre- and post-midnight halves. Tested on a
+    Monday, which is a weekday on both sides of midnight.
     """
     rules = make_user_manager(
         users={"kid1": {"curfew": {"weekdays": "22:00-06:00"}}}
     )._generate_rules()
-    allowed_midday, proc = pam_curfew("kid1", rules, f"{MONDAY} 14:00:00")
-    # Document the real outcome rather than assuming; the value here reflects how
-    # pam_time treats the inverted range and is the signal that the curfew is not
-    # behaving as a parent would expect for overnight windows.
-    assert allowed_midday in (True, False)
-    print(
-        f"[overnight-curfew] Wk2200-0600 at Mon 14:00 -> "
-        f"{'ALLOWED' if allowed_midday else 'DENIED'} (intended: DENIED)"
-    )
+
+    # Midday is outside the overnight window -> login denied.
+    allowed_midday, _ = pam_curfew("kid1", rules, f"{MONDAY} 14:00:00")
+    assert (
+        not allowed_midday
+    ), "expected login denied at Mon 14:00 (outside 22:00-06:00)"
+
+    # Late evening, before midnight, is inside the window -> login allowed.
+    allowed_evening, proc = pam_curfew("kid1", rules, f"{MONDAY} 23:00:00")
+    assert (
+        allowed_evening
+    ), f"expected login allowed at Mon 23:00, got: {proc.stderr or proc.stdout}"
+
+    # Early morning, after midnight, is inside the window -> login allowed.
+    allowed_morning, proc = pam_curfew("kid1", rules, f"{MONDAY} 02:00:00")
+    assert (
+        allowed_morning
+    ), f"expected login allowed at Mon 02:00, got: {proc.stderr or proc.stdout}"
